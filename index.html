@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#f6e7cf">
+<title>滴滴手沖 Drip Drip</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Huninn&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <button class="music" id="btn-music" hidden aria-label="背景音樂開關">🎵</button>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- 監督店長 -->
+  <div class="boss" id="boss" hidden>
+    <div class="boss-cat" id="boss-cat"></div>
+    <div class="boss-say" id="boss-say"></div>
+  </div>
+  <div class="paw" id="paw">
+    <svg viewBox="0 0 200 140">
+      <path d="M0 40 H110 Q190 40 190 70 Q190 100 110 100 H0 Z" fill="#9aa6b8" stroke="#4a2f1d" stroke-width="6"/>
+      <path d="M118 42 Q188 42 188 70 Q188 98 118 98 Q104 70 118 42 Z" fill="#fffaf0"/>
+      <ellipse cx="128" cy="70" rx="22" ry="18" fill="#f6a6a0"/>
+      <ellipse cx="166" cy="52" rx="9" ry="8" fill="#f6a6a0"/>
+      <ellipse cx="174" cy="70" rx="9" ry="8" fill="#f6a6a0"/>
+      <ellipse cx="166" cy="88" rx="9" ry="8" fill="#f6a6a0"/>
+      <path d="M30 40 v20 M52 40 v26 M74 40 v20" stroke="#76839a" stroke-width="8" stroke-linecap="round"/>
+    </svg>
+  </div>
+
+  <!-- 標題 -->
+  <section class="screen active" id="s-title">
+    <div class="title-wrap">
+      <div class="logo">滴滴手沖<small>Drip Drip</small></div>
+      <div class="cat-big" id="title-cat"></div>
+      <p class="bubble">哼，我是店長拿鐵。<br>我會盯著你，沖錯我就生氣喵！</p>
+      <button class="btn big" id="btn-start">開始沖煮</button>
+      <p class="dex" id="dex"></p>
+    </div>
+  </section>
+
+  <!-- 選擇（豆子 / 濾杯 / 沖法 共用） -->
+  <section class="screen" id="s-pick">
+    <header class="top"><span class="step" id="pick-step"></span><h2 id="pick-title"></h2></header>
+    <div class="cards" id="pick-cards"></div>
+    <button class="btn" id="btn-pick-next" disabled>下一步</button>
+  </section>
+
+  <!-- 秤豆 -->
+  <section class="screen" id="s-weigh">
+    <header class="top"><span class="step">4 / 7</span><h2>秤豆</h2></header>
+    <p class="hint" id="weigh-hint"></p>
+    <div class="scale">
+      <div class="bowl" id="bowl"></div>
+      <div class="scale-body"><span id="weigh-val">0.0</span> g</div>
+    </div>
+    <button class="btn hold" id="btn-pour-beans">按住倒豆</button>
+    <div class="row">
+      <button class="btn ghost" id="btn-weigh-reset">倒掉重來</button>
+      <button class="btn" id="btn-weigh-done">秤好了</button>
+    </div>
+  </section>
+
+  <!-- 研磨 -->
+  <section class="screen" id="s-grind">
+    <header class="top"><span class="step">5 / 7</span><h2>手磨</h2></header>
+    <p class="hint" id="grind-hint"></p>
+    <div class="dial">
+      <span>細</span>
+      <input type="range" id="grind-size" min="1" max="10" step="1" value="5">
+      <span>粗</span>
+    </div>
+    <p class="dial-val">刻度 <b id="grind-size-val">5</b>・<span id="grind-size-name"></span></p>
+    <div class="grinder" id="grinder">
+      <div class="grinder-body"><div class="grinder-fill" id="grinder-fill"></div></div>
+      <div class="crank" id="crank"><div class="knob"></div></div>
+    </div>
+    <p class="hint small" id="grind-status">用手指繞著磨豆機畫圈，速度越穩越均勻</p>
+    <button class="btn" id="btn-grind-done" disabled>磨好了</button>
+  </section>
+
+  <!-- 濕濾紙 -->
+  <section class="screen" id="s-rinse">
+    <header class="top"><span class="step">6 / 7</span><h2>濕濾紙</h2></header>
+    <p class="hint">用熱水繞濾紙一圈，去掉紙味、順便溫杯</p>
+    <div class="rinse" id="rinse">
+      <svg viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="88" class="rinse-cup"/>
+        <circle cx="100" cy="100" r="70" class="rinse-paper"/>
+        <circle cx="100" cy="100" r="70" class="rinse-wet" id="rinse-wet"/>
+        <circle cx="100" cy="100" r="14" class="rinse-hole"/>
+      </svg>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="btn-rinse-skip">跳過</button>
+      <button class="btn" id="btn-rinse-done" disabled>完成</button>
+    </div>
+  </section>
+
+  <!-- 沖煮 -->
+  <section class="screen" id="s-brew">
+    <header class="top"><span class="step">7 / 7</span><h2 id="brew-title">沖煮</h2></header>
+    <div class="meters">
+      <div class="meter"><small>時間 ×4</small><b id="brew-time">0:00</b></div>
+      <div class="meter"><small>水量</small><b><span id="brew-water">0</span> g</b></div>
+    </div>
+    <div class="stage-box">
+      <div id="brew-stage">按住粉床開始注水</div>
+      <div class="bar"><div class="bar-fill" id="brew-bar"></div><div class="bar-mark"></div></div>
+      <div class="when" id="brew-when"></div>
+    </div>
+    <canvas id="brew-canvas" width="600" height="600"></canvas>
+    <p class="hint small">按住出水，手指繞圈，不要沖到邊緣的濾紙</p>
+  </section>
+
+  <!-- 評鑑 -->
+  <section class="screen" id="s-result">
+    <header class="top"><h2>店長評鑑</h2></header>
+    <div class="result-head">
+      <div class="cat-small" id="result-cat"></div>
+      <div>
+        <div class="stars" id="stars"></div>
+        <div class="score"><b id="score">0</b> 分</div>
+      </div>
+    </div>
+    <p class="bubble" id="comment"></p>
+    <canvas id="radar" width="520" height="400"></canvas>
+    <ul class="breakdown" id="breakdown"></ul>
+    <div class="row">
+      <button class="btn ghost" id="btn-share">分享結果</button>
+      <button class="btn" id="btn-again">再沖一杯</button>
+    </div>
+  </section>
+
+</div>
+<script src="game.js"></script>
+</body>
+</html>
