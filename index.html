@@ -64,6 +64,7 @@
   <section class="screen" id="s-weigh">
     <header class="top"><span class="step">4 / 7</span><h2>秤豆</h2></header>
     <p class="hint" id="weigh-hint"></p>
+    <div class="stage3d" id="stage-weigh"></div>
     <div class="scale">
       <div class="bowl" id="bowl"></div>
       <div class="scale-body"><span id="weigh-val">0.0</span> g</div>
@@ -123,7 +124,7 @@
       <div class="bar"><div class="bar-fill" id="brew-bar"></div><div class="bar-mark"></div></div>
       <div class="when" id="brew-when"></div>
     </div>
-    <canvas id="brew-canvas" width="600" height="600"></canvas>
+    <div class="brew-wrap" id="brew-wrap"><canvas id="brew-canvas" width="600" height="600"></canvas></div>
     <p class="hint small">按住出水，手指繞圈，不要沖到邊緣的濾紙</p>
   </section>
 
@@ -148,5 +149,6 @@
 
 </div>
 <script src="game.js"></script>
+<script type="module" src="scene3d.js"></script>
 </body>
 </html>

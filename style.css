@@ -362,7 +362,8 @@ html, body {
 .when { min-height: 22px; font-size: 15px; }
 .when.go { color: #4f8a2b; }
 .when.late { color: var(--berry); }
-#brew-canvas { width: min(100%, 44dvh); aspect-ratio: 1; touch-action: none; }
+.brew-wrap { position: relative; width: min(100%, 44dvh); aspect-ratio: 1; flex: none; }
+#brew-canvas { position: relative; z-index: 1; display: block; width: 100%; height: 100%; touch-action: none; }
 
 /* 評鑑 */
 .result-head { display: flex; align-items: center; gap: 14px; }
@@ -599,3 +600,43 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .bg3d i, .logo, .btn.big, .card.sel .art { animation: none; }
 }
+
+/* ==========================================================
+   真 3D 場景（秤豆、磨豆、注水）
+   ========================================================== */
+
+.gl { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 22px; }
+.stage3d { display: none; position: relative; width: 100%; height: min(42dvh, 340px); flex: none; }
+
+/* 視角切換 */
+.views { position: absolute; top: 6px; right: 6px; z-index: 3; display: flex; gap: 5px; }
+.views button {
+  appearance: none;
+  padding: 4px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  box-shadow: 0 3px 0 var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.views button.on { background: var(--caramel); color: var(--paper); transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+
+/* 3D 可用時，藏起原本的 2D 器材 */
+#app.has3d .stage3d { display: block; }
+#app.has3d .bowl { display: none; }
+#app.has3d .scale { transform: none; filter: none; }
+#app.has3d .scale-body { width: 200px; margin-top: 0; padding: 4px; font-size: 26px; }
+#app.has3d .grinder {
+  width: 100%;
+  max-width: 360px;
+  height: min(44dvh, 360px);
+  border: none;
+  border-radius: 22px;
+  background: none;
+  box-shadow: none;
+}
+#app.has3d .grinder-body, #app.has3d .crank { display: none; }
