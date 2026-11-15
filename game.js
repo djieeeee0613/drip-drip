@@ -658,67 +658,209 @@ function brewLoop(t) {
   requestAnimationFrame(brewLoop);
 }
 
+// 把 #rrggbb 調亮（正數）或調暗（負數）
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (s) => Math.max(0, Math.min(255, ((n >> s) & 255) + amt));
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+
+// 用光影把俯視的濾杯畫出立體感：桌面影子、凹下去的濾紙和粉床、從壺嘴落下的水柱、熱氣
 function drawBrew(stages) {
   const total = stages[stages.length - 1].cum;
+  const now = performance.now();
+  const TAU = Math.PI * 2;
+  const INK = '#4a2f1d';
+  const OUT_R = 272;
+  const PAPER_R = 248;
+  const circle = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); };
+  let g;
   ctx.clearRect(0, 0, 600, 600);
-  // 濾杯
-  ctx.lineWidth = 8;
-  ctx.strokeStyle = '#4a2f1d';
-  ctx.fillStyle = game.dripper.color;
-  ctx.beginPath(); ctx.arc(C, C, 285, 0, 7); ctx.fill(); ctx.stroke();
-  // 濾紙
-  ctx.fillStyle = result.rinsed ? '#f3ead8' : '#fffaf0';
-  ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.arc(C, C, 255, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(74,47,29,.25)';
-  for (let i = 0; i < 20; i++) {
-    const a = (i / 20) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(C + Math.cos(a) * BED_R, C + Math.sin(a) * BED_R);
-    ctx.lineTo(C + Math.cos(a) * 255, C + Math.sin(a) * 255);
-    ctx.stroke();
-  }
-  // 粉床：越濕越深
-  const wet = clamp(brew.water / total);
-  const col = (a, b) => Math.round(a + (b - a) * wet);
-  ctx.fillStyle = `rgb(${col(139, 74)},${col(90, 44)},${col(52, 24)})`;
-  ctx.strokeStyle = '#4a2f1d';
+
+  // 桌面上的影子
+  g = ctx.createRadialGradient(C + 10, C + 20, 215, C + 10, C + 20, 298);
+  g.addColorStop(0, 'rgba(74,47,29,.4)');
+  g.addColorStop(1, 'rgba(74,47,29,0)');
+  ctx.fillStyle = g;
+  circle(C + 10, C + 20, 298);
+  ctx.fill();
+
+  // 濾杯外圈：左上受光
+  g = ctx.createRadialGradient(C - 110, C - 130, 30, C, C, OUT_R);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.3, game.dripper.color);
+  g.addColorStop(1, shade(game.dripper.color, -60));
+  ctx.fillStyle = g;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 7;
+  circle(C, C, OUT_R);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.75)';
   ctx.lineWidth = 6;
-  ctx.beginPath(); ctx.arc(C, C, BED_R, 0, 7); ctx.fill(); ctx.stroke();
-  // 水面
-  if (brew.pool > 0) {
-    ctx.fillStyle = `rgba(196,140,84,${0.45 * brew.pool})`;
-    ctx.beginPath(); ctx.arc(C, C, BED_R - 6, 0, 7); ctx.fill();
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(C, C, OUT_R - 11, Math.PI * 1.08, Math.PI * 1.5);
+  ctx.stroke();
+
+  // 濾紙：越往中間越暗，看起來是往下凹的
+  g = ctx.createRadialGradient(C, C, BED_R - 10, C, C, PAPER_R);
+  g.addColorStop(0, result.rinsed ? '#bfb08e' : '#d6c8aa');
+  g.addColorStop(1, result.rinsed ? '#f3ead8' : '#fffaf0');
+  ctx.fillStyle = g;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 5;
+  circle(C, C, PAPER_R);
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * TAU;
+    [['rgba(74,47,29,.28)', 0], ['rgba(255,255,255,.7)', 0.035]].forEach(([col, off]) => {
+      ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(C + Math.cos(a + off) * BED_R, C + Math.sin(a + off) * BED_R);
+      ctx.lineTo(C + Math.cos(a + off) * (PAPER_R - 3), C + Math.sin(a + off) * (PAPER_R - 3));
+      ctx.stroke();
+    });
   }
-  // 泡泡
+
+  // 粉床：越濕越深，中間最深
+  const wet = clamp(brew.water / total);
+  const base = [139 + (74 - 139) * wet, 90 + (44 - 90) * wet, 52 + (24 - 52) * wet];
+  const rgb = (k) => `rgb(${base.map((v) => Math.round(clamp(v * k, 0, 255))).join(',')})`;
+  g = ctx.createRadialGradient(C + 14, C + 22, 8, C, C, BED_R);
+  g.addColorStop(0, rgb(0.55));
+  g.addColorStop(0.65, rgb(0.95));
+  g.addColorStop(1, rgb(1.2));
+  ctx.fillStyle = g;
+  circle(C, C, BED_R);
+  ctx.fill();
+  // 上緣的內陰影
+  g = ctx.createLinearGradient(0, C - BED_R, 0, C + BED_R);
+  g.addColorStop(0, 'rgba(0,0,0,.45)');
+  g.addColorStop(0.3, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(255,220,170,.12)');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 6;
+  ctx.stroke();
+
+  // 水面：帶反光
+  if (brew.pool > 0) {
+    g = ctx.createRadialGradient(C - 60, C - 80, 10, C, C, BED_R);
+    g.addColorStop(0, `rgba(236,190,130,${0.6 * brew.pool})`);
+    g.addColorStop(1, `rgba(150,95,50,${0.45 * brew.pool})`);
+    ctx.fillStyle = g;
+    circle(C, C, BED_R - 6);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,255,255,${0.3 * brew.pool})`;
+    ctx.beginPath();
+    ctx.ellipse(C - 78, C - 100, 74, 24, -0.6, 0, TAU);
+    ctx.fill();
+  }
+
+  // 泡泡和水波
   ctx.save();
-  ctx.beginPath(); ctx.arc(C, C, BED_R - 4, 0, 7); ctx.clip();
+  circle(C, C, BED_R - 4);
+  ctx.clip();
   brew.bubbles.forEach((b) => {
     ctx.fillStyle = `rgba(240,205,150,${b.life * 0.8})`;
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill();
+    circle(b.x, b.y, b.r);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,255,255,${b.life * 0.7})`;
+    circle(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.28);
+    ctx.fill();
   });
+  brew.ripples = brew.ripples || [];
+  if (brew.pouring && Math.random() < 0.2) brew.ripples.push({ x: brew.px, y: brew.py, r: 14, life: 1 });
+  brew.ripples.forEach((p) => {
+    p.r += 2.4;
+    p.life -= 0.035;
+    ctx.strokeStyle = `rgba(255,255,255,${Math.max(0, p.life) * 0.55})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.r, p.r * 0.72, 0, 0, TAU);
+    ctx.stroke();
+  });
+  brew.ripples = brew.ripples.filter((p) => p.life > 0);
   ctx.restore();
+
   // 引導圈
   if (brew.phase === 'pour') {
     ctx.setLineDash([14, 14]);
     ctx.lineWidth = 5;
-    ctx.strokeStyle = 'rgba(255,250,240,.55)';
-    ctx.beginPath(); ctx.arc(C, C, BED_R * 0.48, 0, 7); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,250,240,.6)';
+    circle(C, C, BED_R * 0.48);
+    ctx.stroke();
     ctx.setLineDash([]);
   }
   // 沖到邊緣的警告
   if (brew.onEdge) {
     ctx.lineWidth = 14;
     ctx.strokeStyle = 'rgba(226,114,91,.85)';
-    ctx.beginPath(); ctx.arc(C, C, BED_R - 8, 0, 7); ctx.stroke();
+    circle(C, C, BED_R - 8);
+    ctx.stroke();
   }
-  // 水柱
+
+  // 熱氣往上飄
+  if (brew.water > 0) {
+    for (let i = 0; i < 5; i++) {
+      const ph = (now / 2800 + i * 0.2) % 1;
+      const x = C - 130 + i * 65 + Math.sin(now / 520 + i * 2) * 16;
+      const y = C + 60 - ph * 300;
+      ctx.fillStyle = `rgba(255,255,255,${Math.sin(ph * Math.PI) * 0.2})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 16 + ph * 20, 26 + ph * 30, 0, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // 水柱：從右上方的壺嘴落到手指的位置
   if (brew.pouring) {
-    ctx.fillStyle = 'rgba(190,225,245,.9)';
+    const x = brew.px;
+    const y = brew.py;
+    const sx = x + 56;
+    const sy = y - 190;
+    g = ctx.createLinearGradient(sx, sy, x, y);
+    g.addColorStop(0, 'rgba(255,255,255,.95)');
+    g.addColorStop(1, 'rgba(150,205,240,.9)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(sx - 5, sy);
+    ctx.quadraticCurveTo(x + 18, y - 120, x - 9, y);
+    ctx.lineTo(x + 9, y);
+    ctx.quadraticCurveTo(x + 34, y - 120, sx + 6, sy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 落點
+    ctx.fillStyle = 'rgba(215,238,250,.92)';
     ctx.strokeStyle = '#fffaf0';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 22, 14, 0, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    // 壺嘴
+    g = ctx.createLinearGradient(sx, sy - 80, sx + 80, sy);
+    g.addColorStop(0, '#aab4c0');
+    g.addColorStop(1, '#4f5863');
+    ctx.fillStyle = g;
+    ctx.strokeStyle = INK;
     ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(brew.px, brew.py, 20, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx - 12, sy + 8);
+    ctx.lineTo(sx + 10, sy - 6);
+    ctx.lineTo(sx + 110, sy - 92);
+    ctx.lineTo(sx + 84, sy - 112);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 }
 
@@ -787,7 +929,7 @@ function finish() {
   saveDex(`${bean.id}-${dripper.id}-${method.id}`, stars);
   $('result-cat').innerHTML = catSvg(['angry', 'watch', 'ok', 'happy'][stars]);
   $('stars').innerHTML = [0, 1, 2].map((i) => `<span>${i < stars ? '⭐' : '☆'}</span>`).join('');
-  $('score').textContent = score;
+  countUp($('score'), score);
   $('comment').textContent = comment;
   const rows = [
     ['秤豆', sDose, 10, `${result.dose.toFixed(1)} g / ${method.dose} g`],
@@ -842,6 +984,26 @@ function drawRadar(ideal, cup) {
   g.textAlign = 'left';
   g.fillText('橘色：這一杯　虛線：理想風味', 10, 388);
 }
+
+// 分數從 0 跳到最終分數
+function countUp(el, target) {
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = clamp((t - t0) / 900);
+    el.textContent = Math.round(target * (1 - (1 - k) ** 3));
+    if (k < 1 && lastResult && lastResult.score === target) requestAnimationFrame(step);
+    else el.textContent = target;
+  };
+  requestAnimationFrame(step);
+}
+
+// 背景的豆子跟著手指稍微位移，做出景深
+document.getElementById('app').addEventListener('pointermove', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  const bg = document.querySelector('.bg3d');
+  bg.style.setProperty('--px', (((e.clientX - r.left) / r.width - 0.5) * -24).toFixed(1));
+  bg.style.setProperty('--py', (((e.clientY - r.top) / r.height - 0.5) * -24).toFixed(1));
+});
 
 /* ---------- 分享結果 ---------- */
 

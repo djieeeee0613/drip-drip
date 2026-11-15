@@ -380,3 +380,222 @@ html, body {
   padding: 4px 10px;
   border-bottom: 2px dashed #d8c19c;
 }
+
+/* ==========================================================
+   3D 風格：景深、立體按鈕、翻轉轉場、光影
+   ========================================================== */
+
+#app {
+  perspective: 900px;
+  background-color: var(--cream);
+  background-image:
+    radial-gradient(#ecd6b3 2px, transparent 2px),
+    radial-gradient(circle at 50% 0%, #fff6e2 0%, #f6e7cf 45%, #e6cba0 100%);
+  background-size: 22px 22px, 100% 100%;
+}
+
+/* 背景漂浮的咖啡豆（有遠近） */
+.bg3d {
+  position: absolute;
+  inset: -20px;
+  pointer-events: none;
+  transform: translate(calc(var(--px, 0) * 1px), calc(var(--py, 0) * 1px));
+  transition: transform .35s ease-out;
+}
+.bg3d i {
+  position: absolute;
+  width: 34px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #c08a5a, #6b3f22 75%);
+  box-shadow: inset -4px -6px 8px rgba(0, 0, 0, .25), 0 12px 14px rgba(74, 47, 29, .18);
+  opacity: .45;
+  animation: floatBean 9s ease-in-out infinite;
+}
+.bg3d i::after {
+  content: "";
+  position: absolute;
+  left: 46%;
+  top: 10%;
+  bottom: 10%;
+  width: 3px;
+  border-radius: 3px;
+  background: rgba(60, 30, 12, .6);
+  transform: rotate(8deg);
+}
+@keyframes floatBean {
+  0%, 100% { transform: translateY(0) rotate(var(--r, 20deg)) scale(var(--s, 1)); }
+  50% { transform: translateY(-28px) rotate(calc(var(--r, 20deg) + 40deg)) scale(var(--s, 1)); }
+}
+
+/* 畫面切換：像翻頁一樣轉進來 */
+.screen { transform-style: preserve-3d; }
+.screen.active { animation: flipIn .5s cubic-bezier(.2, .9, .3, 1.15); }
+@keyframes flipIn {
+  from { opacity: 0; transform: translateX(-50px) translateZ(-180px) rotateY(-38deg); }
+  to { opacity: 1; transform: none; }
+}
+
+.top h2 { text-shadow: 0 2px 0 #fff, 0 5px 6px rgba(74, 47, 29, .18); }
+.step { box-shadow: 0 3px 0 rgba(0, 0, 0, .35); }
+
+/* 立體按鈕：有厚度，按下去會陷下去 */
+.btn {
+  background: linear-gradient(#f3ad5e, #d9893b 55%, #c8762a);
+  box-shadow:
+    0 6px 0 var(--caramel-dark),
+    0 6px 0 3px var(--ink),
+    0 16px 14px rgba(74, 47, 29, .25),
+    inset 0 2px 0 rgba(255, 255, 255, .5);
+  text-shadow: 0 2px 0 rgba(74, 47, 29, .35);
+  transition: transform .1s, box-shadow .1s;
+}
+.btn:active, .btn.down {
+  transform: translateY(5px);
+  box-shadow:
+    0 1px 0 var(--caramel-dark),
+    0 1px 0 3px var(--ink),
+    0 4px 5px rgba(74, 47, 29, .25),
+    inset 0 2px 0 rgba(255, 255, 255, .5);
+}
+.btn.ghost {
+  background: linear-gradient(#ffffff, #f3e6cc);
+  text-shadow: none;
+  box-shadow: 0 6px 0 #cdb891, 0 6px 0 3px var(--ink), 0 16px 14px rgba(74, 47, 29, .2), inset 0 2px 0 #fff;
+}
+.btn.ghost:active { box-shadow: 0 1px 0 #cdb891, 0 1px 0 3px var(--ink), 0 4px 5px rgba(74, 47, 29, .2); }
+.btn.hold {
+  background: linear-gradient(#b0d48a, #8fb56a 55%, #7a9f57);
+  box-shadow: 0 6px 0 #5f8040, 0 6px 0 3px var(--ink), 0 16px 14px rgba(74, 47, 29, .25), inset 0 2px 0 rgba(255, 255, 255, .5);
+}
+.btn.hold.down { box-shadow: 0 1px 0 #5f8040, 0 1px 0 3px var(--ink), 0 4px 5px rgba(74, 47, 29, .25); }
+.btn:disabled {
+  background: #cdbfa8;
+  text-shadow: none;
+  transform: none;
+  box-shadow: 0 4px 0 #a2937c, 0 4px 0 3px #8a7a66;
+}
+.btn.big { animation: btnPulse 1.8s ease-in-out infinite; }
+@keyframes btnPulse { 50% { transform: translateY(-4px) scale(1.03); } }
+.btn.big:active { animation: none; }
+
+.music {
+  background: radial-gradient(circle at 35% 30%, #fff, #f1e2c4);
+  box-shadow: 0 4px 0 #cdb891, 0 4px 0 3px var(--ink), 0 8px 8px rgba(74, 47, 29, .2);
+}
+
+/* 標題：立體字 + 飄浮的店長 */
+.title-wrap { perspective: 700px; }
+.logo {
+  color: #f6b566;
+  text-shadow:
+    0 1px 0 #e39a45, 0 2px 0 #d98f3c, 0 3px 0 #cf8433, 0 4px 0 #c4792b,
+    0 5px 0 #b86e24, 0 6px 0 #a9621d, 0 7px 0 var(--ink),
+    0 18px 16px rgba(74, 47, 29, .35);
+  animation: logo3d 4.5s ease-in-out infinite;
+}
+.logo small { text-shadow: 0 2px 0 #fff; }
+@keyframes logo3d {
+  0%, 100% { transform: rotate(-3deg) rotateY(-16deg) rotateX(6deg); }
+  50% { transform: rotate(-3deg) rotateY(16deg) rotateX(-4deg); }
+}
+.cat-big { position: relative; filter: drop-shadow(0 10px 6px rgba(74, 47, 29, .25)); }
+.cat-big::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: -14px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(rgba(74, 47, 29, .35), transparent 70%);
+  animation: groundShadow 2.4s ease-in-out infinite;
+}
+@keyframes groundShadow { 50% { transform: translateY(8px) scaleX(.78); opacity: .6; } }
+.cat-small, .boss-cat { filter: drop-shadow(0 6px 4px rgba(74, 47, 29, .3)); }
+.paw { filter: drop-shadow(0 14px 10px rgba(74, 47, 29, .4)); }
+
+.bubble, .meter {
+  box-shadow: 0 5px 0 #cdb891, 0 5px 0 3px var(--ink), 0 14px 12px rgba(74, 47, 29, .15);
+  background: linear-gradient(#ffffff, #fbf1dc);
+}
+
+/* 卡片：浮起來、選中時往前傾 */
+.cards { perspective: 800px; }
+.card {
+  background: linear-gradient(160deg, #fffdf6, #f8ecd4);
+  box-shadow: 0 6px 0 #cdb891, 0 6px 0 3px var(--ink), 0 18px 16px rgba(74, 47, 29, .18);
+  transform-style: preserve-3d;
+  transition: transform .28s cubic-bezier(.2, .9, .3, 1.4), box-shadow .28s;
+  animation: cardIn .55s cubic-bezier(.2, .9, .3, 1.2) backwards;
+}
+.card:nth-child(2) { animation-delay: .09s; }
+.card:nth-child(3) { animation-delay: .18s; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(50px) rotateX(-65deg); } }
+.card .art {
+  transform: translateZ(30px);
+  filter: drop-shadow(0 6px 4px rgba(74, 47, 29, .25));
+  transition: transform .28s cubic-bezier(.2, .9, .3, 1.4);
+}
+.card.sel {
+  background: linear-gradient(160deg, #fff5d6, #ffe09a);
+  transform: translateY(-8px) rotateX(9deg) rotateY(-7deg) scale(1.04);
+  box-shadow: 0 12px 0 #dfae5c, 0 12px 0 3px var(--caramel-dark), 0 30px 24px rgba(74, 47, 29, .28);
+}
+.card.sel .art { animation: artBob 1.3s ease-in-out infinite; }
+@keyframes artBob {
+  0%, 100% { transform: translateZ(55px) scale(1.15) rotate(-8deg); }
+  50% { transform: translateZ(55px) scale(1.22) rotate(6deg) translateY(-4px); }
+}
+
+/* 秤：往後傾斜的檯面 */
+.scale { transform: rotateX(16deg); transform-style: preserve-3d; filter: drop-shadow(0 18px 12px rgba(74, 47, 29, .22)); }
+.bowl { background: radial-gradient(ellipse at 50% 0%, #e9dcc0 0%, #fffaf0 60%); box-shadow: inset 0 -10px 14px rgba(74, 47, 29, .12); }
+.bowl i {
+  background: radial-gradient(circle at 35% 30%, #b0764a, #6b3f22 72%);
+  box-shadow: inset -2px -3px 4px rgba(0, 0, 0, .3);
+}
+.scale-body {
+  background: linear-gradient(#f2f6f3, #c9d3cc);
+  box-shadow: 0 8px 0 #9aa69e, 0 8px 0 4px var(--ink), inset 0 3px 0 #fff;
+}
+.scale-body span { text-shadow: 0 2px 0 #fff; }
+
+/* 磨豆機：金屬圓筒 */
+.grinder {
+  background: radial-gradient(circle, rgba(255, 250, 240, .95) 30%, rgba(255, 250, 240, .25) 72%);
+  box-shadow: inset 0 0 26px rgba(217, 137, 59, .25);
+}
+.grinder-body {
+  background: linear-gradient(90deg, #8f9fa5, #eef4f5 32%, #c9d3d6 58%, #7f8f95);
+  box-shadow: 0 16px 14px rgba(74, 47, 29, .3);
+}
+.grinder-fill { background: linear-gradient(90deg, #5a3319, #8d5a37 35%, #6b3f22 70%, #4a2a14); }
+.crank { background: linear-gradient(#6b4a35, var(--ink)); box-shadow: 0 8px 6px rgba(74, 47, 29, .35); }
+.knob {
+  background: radial-gradient(circle at 35% 30%, #ffb3a3, #e2725b 55%, #b94f3b);
+  box-shadow: 0 6px 5px rgba(74, 47, 29, .35);
+}
+
+/* 濕濾紙 */
+.rinse { filter: drop-shadow(0 18px 12px rgba(74, 47, 29, .25)); }
+
+/* 沖煮 */
+.meter b { text-shadow: 0 2px 0 #fff; }
+.bar { box-shadow: inset 0 3px 4px rgba(74, 47, 29, .25); }
+.bar-fill { background: linear-gradient(#c7e6f5, #8fc4e0 55%, #6aa9cc); }
+.bar-fill.over { background: linear-gradient(#f5a898, #e2725b 55%, #c2553f); }
+
+/* 評鑑：星星立體翻轉 */
+.result-head { perspective: 600px; }
+.stars span { animation: star3d .8s cubic-bezier(.2, .9, .3, 1.3) backwards; filter: drop-shadow(0 5px 3px rgba(74, 47, 29, .3)); }
+.stars span:nth-child(2) { animation-delay: .25s; }
+.stars span:nth-child(3) { animation-delay: .5s; }
+@keyframes star3d { from { opacity: 0; transform: translateY(-40px) scale(0) rotateY(720deg); } }
+.score b { text-shadow: 0 2px 0 #fff, 0 4px 0 #e6cfa8, 0 8px 8px rgba(74, 47, 29, .25); }
+#radar { filter: drop-shadow(0 10px 8px rgba(74, 47, 29, .18)); }
+.toast { box-shadow: 0 8px 12px rgba(74, 47, 29, .35); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bg3d i, .logo, .btn.big, .card.sel .art { animation: none; }
+}
