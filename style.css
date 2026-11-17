@@ -640,3 +640,14 @@ html, body {
   box-shadow: none;
 }
 #app.has3d .grinder-body, #app.has3d .crank { display: none; }
+
+/* 3D 濕濾紙 */
+#app.has3d .rinse {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  height: min(46dvh, 380px);
+  flex: none;
+  filter: none;
+}
+#app.has3d .rinse svg { display: none; }

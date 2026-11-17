@@ -1,57 +1,230 @@
-// 秤豆、磨豆、注水三個步驟的 3D 場景。
-// 模型全部用基本幾何體組出來，不載入外部模型檔。
-// 載入失敗（沒網路、不支援 WebGL）時 window.Scene3D 不存在，遊戲會自動用原本的 2D 畫面。
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+// 秤豆、磨豆、濕濾紙、注水四個步驟的 3D 場景。
+// 模型全部用程式組出來（不載入外部模型檔），材質用物理光照、環境反射和即時陰影。
+// 載入失敗（沒網路、瀏覽器不支援 import map 或 WebGL）時 window.Scene3D 不存在，遊戲自動改用 2D 畫面。
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
-const INK = 0x4a2f1d;
 const C = 300;      // 遊戲邏輯座標的中心（和 game.js 一致）
 const BED_R = 215;  // 遊戲邏輯座標的粉床半徑
+const TAU = Math.PI * 2;
 
-/* ---------- 材質與小工具 ---------- */
+/* ---------- 小工具 ---------- */
 
-// 三階色階：卡通風的光影
-const grad = new THREE.DataTexture(new Uint8Array([120, 195, 255]), 3, 1, THREE.RedFormat);
-grad.minFilter = THREE.NearestFilter;
-grad.magFilter = THREE.NearestFilter;
-grad.needsUpdate = true;
-
-const toon = (color, extra = {}) => new THREE.MeshToonMaterial({ color, gradientMap: grad, ...extra });
-const glass = (color = 0xdff1f5, opacity = 0.3) => new THREE.MeshPhongMaterial({
-  color, transparent: true, opacity, side: THREE.DoubleSide, shininess: 120, depthWrite: false,
-});
-const flat = (color, opacity = 1) => new THREE.MeshBasicMaterial({
-  color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1, side: THREE.DoubleSide,
-});
-
-// 描邊：把背面沿法線往外推一點
-const outlineMat = new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide });
-outlineMat.onBeforeCompile = (sh) => {
-  sh.vertexShader = sh.vertexShader.replace(
-    '#include <begin_vertex>',
-    '#include <begin_vertex>\n  transformed += normalize(normal) * 0.03;',
-  );
-};
-
-function mesh(geo, mat, x = 0, y = 0, z = 0, outlined = false) {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  if (outlined) m.add(new THREE.Mesh(geo, outlineMat));
-  return m;
-}
-const lathe = (pts, seg = 40) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
-const cyl = (rTop, rBottom, h, seg = 32, open = false) => new THREE.CylinderGeometry(rTop, rBottom, h, seg, 1, open);
 const lerp = (a, b, k) => a + (b - a) * k;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const rand = (a, b) => a + Math.random() * (b - a);
 
-function blobShadow(r, x = 0, z = 0) {
-  const m = mesh(new THREE.CircleGeometry(r, 32), flat(INK, 0.2), x, 0.006, z);
-  m.rotation.x = -Math.PI / 2;
+function mesh(geo, mat, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
   return m;
+}
+const lathe = (pts, seg = 64) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
+const cyl = (rTop, rBottom, h, seg = 48, open = false) => new THREE.CylinderGeometry(rTop, rBottom, h, seg, 1, open);
+
+// 不透明的物件投影、接收陰影；玻璃、水這類透明物件不投影
+function shadows(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const t = o.material.transparent;
+    o.castShadow = !t;
+    o.receiveShadow = !t;
+  });
 }
 
 function disposeGroup(g) {
   g.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
   g.clear();
+}
+
+/* ---------- 程式產生的貼圖 ---------- */
+
+function canvasTex(w, h, draw, { repeat = null, srgb = true } = {}) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  if (repeat) {
+    t.wrapS = THREE.MirroredRepeatWrapping;
+    t.wrapT = THREE.MirroredRepeatWrapping;
+    t.repeat.set(repeat[0], repeat[1]);
+  }
+  return t;
+}
+
+// 木紋
+const woodTex = canvasTex(512, 512, (x, w, h) => {
+  x.fillStyle = '#a8743f';
+  x.fillRect(0, 0, w, h);
+  for (let i = 0; i < 170; i++) {
+    const y0 = Math.random() * h;
+    const amp = rand(3, 12);
+    const f = rand(0.004, 0.014);
+    const ph = rand(0, 6);
+    x.strokeStyle = Math.random() < 0.55
+      ? `rgba(96,56,26,${rand(0.05, 0.22)})`
+      : `rgba(238,196,138,${rand(0.05, 0.2)})`;
+    x.lineWidth = rand(0.6, 3);
+    x.beginPath();
+    for (let X = 0; X <= w; X += 8) {
+      const Y = y0 + Math.sin(X * f + ph) * amp + Math.sin(X * f * 3.1 + ph) * amp * 0.3;
+      if (X) x.lineTo(X, Y); else x.moveTo(X, Y);
+    }
+    x.stroke();
+  }
+}, { repeat: [2, 2] });
+
+// 咖啡粉的顆粒（灰階，顏色由材質決定；同時拿來當凹凸貼圖）
+const grainTex = canvasTex(256, 256, (x, w, h) => {
+  const img = x.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const v = 255 - Math.random() * Math.random() * 190;
+    img.data[i * 4] = v;
+    img.data[i * 4 + 1] = v;
+    img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+}, { repeat: [4, 4] });
+
+// 濾紙的纖維和皺紋
+const paperTex = canvasTex(512, 512, (x, w, h) => {
+  x.fillStyle = '#ffffff';
+  x.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 5) {
+    x.fillStyle = `rgba(130,105,70,${rand(0.03, 0.08)})`;
+    x.fillRect(0, y, w, rand(1, 2));
+  }
+  for (let i = 0; i < 1800; i++) {
+    const X = Math.random() * w;
+    const Y = Math.random() * h;
+    const a = rand(0, TAU);
+    const l = rand(3, 14);
+    x.strokeStyle = `rgba(140,118,90,${rand(0.02, 0.09)})`;
+    x.lineWidth = rand(0.4, 1.2);
+    x.beginPath();
+    x.moveTo(X, Y);
+    x.lineTo(X + Math.cos(a) * l, Y + Math.sin(a) * l);
+    x.stroke();
+  }
+});
+
+// 磨豆機刻度環：深色陽極鋁 + 白色數字
+const dialTex = canvasTex(1024, 128, (x, w, h) => {
+  const g = x.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, '#3a3e45');
+  g.addColorStop(0.5, '#23262b');
+  g.addColorStop(1, '#3a3e45');
+  x.fillStyle = g;
+  x.fillRect(0, 0, w, h);
+  x.fillStyle = '#f4efe6';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  for (let i = 0; i < 40; i++) {
+    const X = (i / 40) * w;
+    const big = i % 4 === 0;
+    x.fillRect(X - 1.5, 0, 3, big ? 38 : 22);
+    if (big) {
+      x.font = 'bold 40px sans-serif';
+      x.fillText(String(i / 4 + 1), X, 82);
+    }
+  }
+});
+
+// 豆袋的牛皮紙 + 標籤（換豆子時重畫）
+const bagCanvas = document.createElement('canvas');
+bagCanvas.width = 512;
+bagCanvas.height = 640;
+const bagTex = new THREE.CanvasTexture(bagCanvas);
+bagTex.colorSpace = THREE.SRGBColorSpace;
+bagTex.anisotropy = 4;
+function drawBag(bean) {
+  const x = bagCanvas.getContext('2d');
+  const w = bagCanvas.width;
+  const h = bagCanvas.height;
+  x.fillStyle = '#c49866';
+  x.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2600; i++) {
+    x.fillStyle = Math.random() < 0.5 ? `rgba(120,80,40,${rand(0.04, 0.14)})` : `rgba(240,210,160,${rand(0.04, 0.14)})`;
+    x.fillRect(Math.random() * w, Math.random() * h, rand(1, 3), rand(1, 8));
+  }
+  // 標籤
+  x.fillStyle = '#fbf6ea';
+  x.fillRect(70, 250, w - 140, 270);
+  x.strokeStyle = '#4a2f1d';
+  x.lineWidth = 5;
+  x.strokeRect(84, 264, w - 168, 242);
+  x.fillStyle = '#4a2f1d';
+  x.textAlign = 'center';
+  x.font = 'bold 30px "Huninn", sans-serif';
+  x.fillText('DRIP DRIP ROASTERY', w / 2, 310);
+  x.fillRect(150, 330, w - 300, 3);
+  x.font = 'bold 44px "Huninn", sans-serif';
+  const name = bean ? bean.name.split(' ') : ['精品咖啡豆'];
+  x.fillText(name[name.length - 1], w / 2, 392);
+  x.font = '30px "Huninn", sans-serif';
+  x.fillText(bean ? `${name[0]}・${bean.roast}` : '', w / 2, 440);
+  x.font = '24px "Huninn", sans-serif';
+  x.fillText(bean ? bean.desc : '', w / 2, 482);
+  bagTex.needsUpdate = true;
+}
+drawBag(null);
+
+/* ---------- 材質 ---------- */
+
+const std = (color, roughness = 0.5, metalness = 0, extra = {}) => new THREE.MeshStandardMaterial({
+  color, roughness, metalness, envMapIntensity: metalness > 0.5 ? 1 : 0.5, ...extra,
+});
+const phys = (opts) => new THREE.MeshPhysicalMaterial(opts);
+const steel = (roughness = 0.25, color = 0xdfe3e8) => std(color, roughness, 1);
+const ceramic = (color) => phys({ color, roughness: 0.22, clearcoat: 0.9, clearcoatRoughness: 0.1, envMapIntensity: 0.7 });
+const glass = (opacity = 0.12, tint = 0xffffff) => phys({
+  color: tint, roughness: 0.03, metalness: 0, transparent: true, opacity,
+  clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6, side: THREE.DoubleSide, depthWrite: false,
+});
+const wood = (tint = 0xffffff, roughness = 0.55) => std(tint, roughness, 0, { map: woodTex });
+
+// 烘焙後豆子的顏色（卡片上的顏色太淺，不適合拿來當豆子本身的顏色）
+const roastColor = (bean) => new THREE.Color(bean && bean.roast === '中焙' ? 0x3f2210 : 0x5c3519);
+
+/* ---------- 共用幾何 ---------- */
+
+// 咖啡豆：一面平、平面上有一道中線凹槽
+function beanGeometry(size = 0.085) {
+  const g = new THREE.SphereGeometry(1, 20, 14);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i) * 0.72;
+    let y = p.getY(i);
+    const z = p.getZ(i) * 1.0;
+    y *= y < 0 ? 0.3 : 0.58;
+    if (y < 0) y += Math.exp(-(x * x) / 0.01) * 0.2;
+    p.setXYZ(i, x * size, y * size, z * size * 1.38);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const BEAN_GEO = beanGeometry();
+
+// 漸細的管子（手沖壺的鵝頸嘴）
+function taperedTube(curve, segs, radial, r0, r1) {
+  const g = new THREE.TubeGeometry(curve, segs, 1, radial, false);
+  const p = g.attributes.position;
+  const c = new THREE.Vector3();
+  for (let i = 0; i <= segs; i++) {
+    curve.getPointAt(i / segs, c);
+    const r = lerp(r0, r1, i / segs);
+    for (let j = 0; j <= radial; j++) {
+      const k = i * (radial + 1) + j;
+      p.setXYZ(k, c.x + (p.getX(k) - c.x) * r, c.y + (p.getY(k) - c.y) * r, c.z + (p.getZ(k) - c.z) * r);
+    }
+  }
+  g.computeVertexNormals();
+  return g;
 }
 
 /* ---------- 共用狀態 ---------- */
@@ -71,6 +244,7 @@ const camPos = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
+const UP = new THREE.Vector3(0, 1, 0);
 
 // 每個場景的三個鏡頭：[鏡頭 x, y, z, 看向 x, y, z]
 const VIEWS = {
@@ -84,6 +258,11 @@ const VIEWS = {
     top: [0, 7.0, 0.01, 0, 1.3, 0],
     side: [0, 1.6, 6.2, 0, 1.45, 0],
   },
+  rinse: {
+    angle: [0.25, 4.9, 3.7, 0.25, 1.75, 0],
+    top: [0, 5.8, 0.01, 0, 1.9, 0],
+    side: [0.5, 2.6, 5.4, 0.4, 1.4, 0],
+  },
   brew: {
     angle: [0.25, 4.7, 3.5, 0.25, 1.8, 0],
     top: [0, 5.6, 0.01, 0, 1.95, 0],
@@ -92,58 +271,81 @@ const VIEWS = {
 };
 const VIEW_NAMES = { angle: '斜角', top: '俯視', side: '側面' };
 
-/* ---------- 場景一：秤豆 ---------- */
+/* ==========================================================
+   場景一：秤豆
+   ========================================================== */
 
 const W = { beans: [], grams: 0, pouring: false, shown: -1, tilt: 0.25 };
+const BOWL_Y = 0.34;
+const BOWL_Z = -0.2;
 
 function buildWeigh() {
   const g = new THREE.Group();
-  g.add(blobShadow(1.9));
 
-  // 電子秤
-  g.add(mesh(new THREE.BoxGeometry(2.6, 0.28, 2.6), toon(0xeef2ee), 0, 0.14, 0, true));
-  g.add(mesh(cyl(1.05, 1.05, 0.07, 40), toon(0xb9c4c8), 0, 0.315, -0.15, true));
+  // 電子秤：石墨色機身、不鏽鋼秤盤、橡膠腳
+  g.add(mesh(new RoundedBoxGeometry(2.6, 0.26, 2.3, 5, 0.09), std(0x2f3237, 0.5), 0, 0.16, 0.05));
+  g.add(mesh(new RoundedBoxGeometry(2.3, 0.05, 1.7, 4, 0.02), steel(0.32), 0, 0.315, BOWL_Z));
+  [[-1.1, -0.95], [1.1, -0.95], [-1.1, 1.05], [1.1, 1.05]].forEach(([x, z]) => {
+    g.add(mesh(cyl(0.1, 0.1, 0.03, 20), std(0x111111, 0.9), x, 0.015, z));
+  });
 
-  // 秤的螢幕（把數字畫在貼圖上）
+  // 液晶螢幕（數字畫在貼圖上）+ 兩顆按鍵
+  g.add(mesh(new RoundedBoxGeometry(1.3, 0.02, 0.38, 2, 0.008), std(0x0d0f11, 0.15), 0, 0.29, 0.93));
   W.canvas = document.createElement('canvas');
   W.canvas.width = 256;
-  W.canvas.height = 96;
+  W.canvas.height = 80;
   W.tex = new THREE.CanvasTexture(W.canvas);
   W.tex.colorSpace = THREE.SRGBColorSpace;
-  const screen = mesh(new THREE.PlaneGeometry(1.15, 0.36), new THREE.MeshBasicMaterial({ map: W.tex }), 0, 0.285, 1.08);
+  const screen = mesh(new THREE.PlaneGeometry(1.12, 0.3), new THREE.MeshBasicMaterial({ map: W.tex, toneMapped: false }), 0, 0.302, 0.93);
   screen.rotation.x = -Math.PI / 2;
   g.add(screen);
+  [-0.88, 0.88].forEach((x) => g.add(mesh(cyl(0.075, 0.075, 0.03, 24), std(0x4a4e55, 0.35, 0.3), x, 0.295, 0.93)));
 
-  // 玻璃碗
-  g.add(mesh(lathe([[0.05, 0], [0.5, 0.04], [0.8, 0.3], [0.93, 0.62], [0.96, 0.66]]), glass(), 0, 0.35, -0.15));
+  // 玻璃碗（有厚度、圓唇）
+  g.add(mesh(lathe([
+    [0.001, 0], [0.5, 0], [0.82, 0.28], [0.96, 0.62], [0.975, 0.66], [0.955, 0.675], [0.93, 0.64],
+    [0.79, 0.31], [0.48, 0.05], [0.001, 0.05],
+  ]), glass(0.2), 0, BOWL_Y, BOWL_Z));
 
-  // 豆袋：以袋底為軸傾斜
+  // 牛皮紙豆袋：底部寬、往上收扁，袋口有封邊和鐵絲
   W.bag = new THREE.Group();
-  W.bag.position.set(1.7, 1.85, -0.15);
-  W.bag.add(mesh(new THREE.BoxGeometry(0.9, 1.25, 0.55), toon(0xc89b6a), 0, 0.625, 0, true));
-  const roll = mesh(cyl(0.11, 0.11, 0.6, 12), toon(0xb08454), 0.3, 1.27, 0, true);
-  roll.rotation.x = Math.PI / 2;
-  W.bag.add(roll);
-  const label = mesh(new THREE.PlaneGeometry(0.55, 0.5), flat(INK), 0, 0.6, 0.281);
-  W.bag.add(label);
-  W.bag.add(mesh(new THREE.CircleGeometry(0.14, 20), flat(0xf6e7cf), 0, 0.6, 0.283));
+  W.bag.position.set(1.75, 1.95, BOWL_Z);
+  const bagGeo = new THREE.BoxGeometry(0.95, 1.3, 0.56, 10, 16, 6);
+  bagGeo.translate(0, 0.65, 0);
+  const bp = bagGeo.attributes.position;
+  for (let i = 0; i < bp.count; i++) {
+    const t = bp.getY(i) / 1.3;
+    const zf = lerp(1, 0.09, t ** 1.7);
+    const xf = 1 + 0.05 * Math.sin(Math.PI * t);
+    bp.setXYZ(i, bp.getX(i) * xf + rand(-0.004, 0.004), bp.getY(i), bp.getZ(i) * zf + rand(-0.003, 0.003));
+  }
+  bagGeo.computeVertexNormals();
+  W.bag.add(mesh(bagGeo, std(0xffffff, 0.85, 0, { map: bagTex })));
+  W.bag.add(mesh(new RoundedBoxGeometry(0.98, 0.12, 0.06, 2, 0.02), std(0xb88a58, 0.8), 0, 1.33, 0));
+  W.bag.add(mesh(new RoundedBoxGeometry(1.08, 0.035, 0.07, 2, 0.012), steel(0.4, 0xd8c08a), 0, 1.25, 0));
+  const valve = mesh(cyl(0.065, 0.065, 0.02, 24), std(0xf2ede2, 0.4), 0.27, 0.98, 0.135);
+  valve.rotation.x = Math.PI / 2;
+  W.bag.add(valve);
   g.add(W.bag);
 
   W.group = g;
-  W.beanGeo = new THREE.SphereGeometry(0.085, 10, 8);
-  W.beanMat = toon(0x7a4a2b);
+  W.beanMats = [0, 1, 2].map(() => phys({ color: 0x5a3218, roughness: 0.5, clearcoat: 0.18, clearcoatRoughness: 0.5, envMapIntensity: 0.5 }));
   return g;
 }
 
 function drawScale(grams) {
   const c = W.canvas.getContext('2d');
-  c.fillStyle = '#20302a';
-  c.fillRect(0, 0, 256, 96);
-  c.fillStyle = '#8ff2c0';
-  c.font = 'bold 64px monospace';
-  c.textAlign = 'center';
+  c.fillStyle = '#0f1a16';
+  c.fillRect(0, 0, 256, 80);
+  c.fillStyle = 'rgba(140,240,190,.12)';
+  c.font = 'bold 58px monospace';
+  c.textAlign = 'right';
   c.textBaseline = 'middle';
-  c.fillText(`${grams.toFixed(1)} g`, 128, 52);
+  c.fillText('888.8', 200, 44);
+  c.fillStyle = '#9dffd0';
+  c.fillText(grams.toFixed(1), 200, 44);
+  c.font = 'bold 30px monospace';
+  c.fillText('g', 236, 50);
   W.tex.needsUpdate = true;
 }
 
@@ -153,33 +355,40 @@ function resetWeigh(game) {
   W.grams = 0;
   W.pouring = false;
   W.shown = -1;
-  W.beanMat.color.set(game.bean ? game.bean.color : '#7a4a2b');
+  if (game.bean) {
+    const base = roastColor(game.bean);
+    W.beanMats.forEach((m, i) => m.color.copy(base).multiplyScalar([1, 0.8, 1.2][i]));
+    drawBag(game.bean);
+  }
 }
 
 function updateWeigh(dt) {
   const shown = Math.round(W.grams * 10);
   if (shown !== W.shown) { W.shown = shown; drawScale(W.grams); }
-  if (W.grams < 0.05 && W.beans.length) resetWeigh({ bean: null });
+  if (W.grams < 0.05 && W.beans.length) resetWeigh({});
 
   W.tilt = lerp(W.tilt, W.pouring ? 2.05 : 0.25, 1 - 0.0005 ** dt);
   W.bag.rotation.z = W.tilt;
+  W.bag.position.y = 1.95 + Math.sin(W.tilt) * 0.06; // 傾倒時稍微抬起
 
   // 袋口在世界座標的位置
-  const mouth = new THREE.Vector3(-0.25, 1.3, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), W.tilt).add(W.bag.position);
+  const mouth = new THREE.Vector3(-0.3, 1.32, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), W.tilt).add(W.bag.position);
 
-  const want = Math.min(90, Math.floor(W.grams / 0.22));
+  const want = Math.min(110, Math.floor(W.grams / 0.18));
   while (W.beans.length < want) {
     const i = W.beans.length;
-    const layer = Math.floor(i / 12);
-    const r = Math.sqrt(Math.random()) * Math.min(0.78, 0.4 + layer * 0.07);
-    const a = Math.random() * Math.PI * 2;
-    const m = new THREE.Mesh(W.beanGeo, W.beanMat);
-    m.scale.set(1, 0.62, 1.4);
-    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    const layer = Math.floor(i / 13);
+    const r = Math.sqrt(Math.random()) * Math.min(0.78, 0.38 + layer * 0.07);
+    const a = rand(0, TAU);
+    const m = new THREE.Mesh(BEAN_GEO, W.beanMats[i % 3]);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    m.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3));
     W.group.add(m);
     W.beans.push({
-      m, t: 0, from: mouth.clone(),
-      to: new THREE.Vector3(Math.cos(a) * r, 0.44 + layer * 0.075, -0.15 + Math.sin(a) * r),
+      m, t: 0, from: mouth.clone(), spin: rand(6, 12),
+      to: new THREE.Vector3(Math.cos(a) * r, BOWL_Y + 0.09 + layer * 0.07, BOWL_Z + Math.sin(a) * r),
+      rest: new THREE.Euler(rand(-0.4, 0.4), rand(0, TAU), rand(-0.4, 0.4)),
     });
   }
   W.beans.forEach((b) => {
@@ -187,55 +396,95 @@ function updateWeigh(dt) {
     b.t = Math.min(1, b.t + dt / 0.42);
     b.m.position.lerpVectors(b.from, b.to, b.t);
     b.m.position.y += Math.sin(b.t * Math.PI) * 0.35; // 拋物線
-    b.m.rotation.x += dt * 9;
+    if (b.t < 1) b.m.rotation.x += dt * b.spin;
+    else b.m.rotation.copy(b.rest); // 落定後平躺
   });
 }
 
-/* ---------- 場景二：磨豆 ---------- */
+/* ==========================================================
+   場景二：磨豆
+   ========================================================== */
 
-const G = { angle: 0, p: 0, size: 5, shownAngle: 0 };
+const G = { angle: 0, p: 0, size: 5, shownAngle: 0, moving: 0 };
+const HOPPER_BEANS = 70;
 
 function buildGrind() {
   const g = new THREE.Group();
-  g.add(blobShadow(0.95));
 
-  // 粉倉（透明）和裡面的咖啡粉
-  g.add(mesh(cyl(0.5, 0.5, 0.8, 32, true), glass(), 0, 0.4, 0));
-  g.add(mesh(cyl(0.5, 0.5, 0.04), toon(0xb9c4c8), 0, 0.02, 0, true));
-  G.grounds = mesh(cyl(0.46, 0.46, 1), toon(0x5a3319));
+  // 粉杯：厚玻璃 + 不鏽鋼底座 + 螺紋
+  g.add(mesh(cyl(0.52, 0.52, 0.06, 64), steel(0.3), 0, 0.03, 0));
+  g.add(mesh(lathe([[0.49, 0.06], [0.49, 0.8], [0.46, 0.8], [0.46, 0.08]]), glass(0.18), 0, 0, 0));
+  [0.7, 0.745].forEach((y) => {
+    const t = mesh(new THREE.TorusGeometry(0.493, 0.009, 8, 64), glass(0.35), 0, y, 0);
+    t.rotation.x = Math.PI / 2;
+    g.add(t);
+  });
+  // 杯裡的咖啡粉：頂端微微隆起
+  G.groundsMat = std(0x5a3319, 0.95, 0, { map: grainTex, bumpMap: grainTex, bumpScale: 2 });
+  G.grounds = mesh(lathe([[0.001, 0], [0.44, 0], [0.44, 0.9], [0.32, 0.96], [0.001, 1]], 48), G.groundsMat);
   g.add(G.grounds);
 
-  // 刻度環
-  G.ring = new THREE.Group();
-  G.ring.position.y = 0.89;
-  G.ring.add(mesh(cyl(0.56, 0.56, 0.18), toon(0x4a4f57), 0, 0, 0, true));
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2;
-    const tick = mesh(new THREE.BoxGeometry(0.03, i === 0 ? 0.16 : 0.09, 0.02), flat(i === 0 ? 0xe2725b : 0xfffaf0), Math.sin(a) * 0.565, 0, Math.cos(a) * 0.565);
-    tick.rotation.y = a;
-    G.ring.add(tick);
-  }
+  // 刻度環（深色鋁，數字貼圖）
+  G.ring = mesh(cyl(0.545, 0.545, 0.17, 96), std(0xffffff, 0.35, 0.55, { map: dialTex }), 0, 0.89, 0);
   g.add(G.ring);
+  const mark = mesh(new THREE.BoxGeometry(0.04, 0.05, 0.02), std(0xe2725b, 0.4), 0, 1.0, 0.535);
+  g.add(mark);
 
-  // 金屬機身 + 木頭握環
-  g.add(mesh(cyl(0.5, 0.5, 0.8), toon(0xd4dde0), 0, 1.38, 0, true));
-  g.add(mesh(cyl(0.52, 0.52, 0.2), toon(0xb56a22), 0, 1.38, 0));
+  // 機身：滾花鋁 + 胡桃木握環
+  const body = new THREE.CylinderGeometry(0.5, 0.5, 0.8, 120, 1, true);
+  const p = body.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const a = Math.atan2(p.getZ(i), p.getX(i));
+    const k = 1 + 0.014 * (Math.round(((a + Math.PI) / TAU) * 120) % 2);
+    p.setX(i, p.getX(i) * k);
+    p.setZ(i, p.getZ(i) * k);
+  }
+  body.computeVertexNormals();
+  g.add(mesh(body, std(0xc9ced4, 0.38, 0.9), 0, 1.38, 0));
+  g.add(mesh(cyl(0.53, 0.53, 0.3, 96), wood(0x8c7058, 0.45), 0, 1.38, 0));
+  [0.98, 1.78].forEach((y) => g.add(mesh(cyl(0.525, 0.525, 0.035, 96), steel(0.18), 0, y, 0)));
 
-  // 豆倉（透明）和裡面的豆子
-  g.add(mesh(cyl(0.5, 0.5, 0.5, 32, true), glass(), 0, 2.03, 0));
-  G.beanMat = toon(0x7a4a2b);
-  G.beans = mesh(cyl(0.46, 0.46, 1), G.beanMat);
+  // 豆倉（透明）和裡面一顆顆的豆子
+  g.add(mesh(cyl(0.5, 0.5, 0.5, 64, true), glass(0.16), 0, 2.03, 0));
+  G.beanMat = phys({ color: 0x5a3218, roughness: 0.5, clearcoat: 0.18, envMapIntensity: 0.5 });
+  G.beans = new THREE.InstancedMesh(BEAN_GEO, G.beanMat, HOPPER_BEANS);
+  const d = new THREE.Object3D();
+  for (let i = 0; i < HOPPER_BEANS; i++) {
+    const layer = Math.floor(i / 12);
+    const r = Math.sqrt(Math.random()) * 0.4;
+    const a = rand(0, TAU);
+    d.position.set(Math.cos(a) * r, 1.84 + layer * 0.075, Math.sin(a) * r);
+    d.rotation.set(rand(-0.5, 0.5), rand(0, TAU), rand(-0.5, 0.5));
+    d.updateMatrix();
+    G.beans.setMatrixAt(i, d.matrix);
+  }
   g.add(G.beans);
 
-  // 蓋子和把手
-  g.add(mesh(cyl(0.53, 0.53, 0.06), toon(0x4a4f57), 0, 2.31, 0, true));
+  // 蓋子、軸承
+  g.add(mesh(cyl(0.535, 0.535, 0.06, 96), steel(0.2), 0, 2.31, 0));
+  g.add(mesh(cyl(0.13, 0.15, 0.08, 40), steel(0.15), 0, 2.37, 0));
+
+  // 把手：圓管曲柄 + 木頭握把
   G.crank = new THREE.Group();
-  G.crank.position.y = 2.38;
-  G.crank.add(mesh(cyl(0.09, 0.09, 0.14, 16), toon(0x9aa6b8), 0, 0, 0, true));
-  G.crank.add(mesh(new THREE.BoxGeometry(1.05, 0.07, 0.15), toon(0xb9c4c8), 0.5, 0.04, 0, true));
-  G.crank.add(mesh(cyl(0.05, 0.05, 0.28, 12), toon(0x9aa6b8), 1.0, 0.2, 0));
-  G.crank.add(mesh(new THREE.SphereGeometry(0.17, 20, 14), toon(0xe2725b), 1.0, 0.42, 0, true));
+  G.crank.position.y = 2.42;
+  G.crank.add(mesh(cyl(0.1, 0.1, 0.07, 40), steel(0.15), 0, 0, 0));
+  G.crank.add(mesh(cyl(0.035, 0.035, 0.06, 20), steel(0.2), 0, 0.06, 0));
+  const arm = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.02, 0), new THREE.Vector3(0.4, 0.06, 0), new THREE.Vector3(0.8, 0.16, 0), new THREE.Vector3(1.0, 0.2, 0),
+  ]);
+  G.crank.add(mesh(new THREE.TubeGeometry(arm, 32, 0.036, 16), steel(0.16)));
+  G.crank.add(mesh(cyl(0.025, 0.025, 0.1, 16), steel(0.2), 1.0, 0.25, 0));
+  G.crank.add(mesh(lathe([[0.001, 0], [0.06, 0], [0.11, 0.07], [0.135, 0.19], [0.12, 0.29], [0.07, 0.34], [0.001, 0.35]], 40),
+    wood(0x9a7a5c, 0.4), 1.0, 0.29, 0));
   g.add(G.crank);
+
+  // 掉進粉杯的細粉
+  const pts = new Float32Array(90 * 3);
+  G.dustGeo = new THREE.BufferGeometry();
+  G.dustGeo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+  G.dust = new THREE.Points(G.dustGeo, new THREE.PointsMaterial({ color: 0x4a2a14, size: 0.03, transparent: true, opacity: 0.9 }));
+  G.dustSeed = Array.from({ length: 90 }, () => [rand(0, TAU), Math.sqrt(Math.random()) * 0.22, Math.random()]);
+  g.add(G.dust);
   return g;
 }
 
@@ -244,7 +493,8 @@ function resetGrind(game) {
   G.shownAngle = 0;
   G.p = 0;
   G.size = 5;
-  G.beanMat.color.set(game.bean ? game.bean.color : '#7a4a2b');
+  G.moving = 0;
+  if (game.bean) G.beanMat.color.copy(roastColor(game.bean));
 }
 
 function updateGrind(dt) {
@@ -253,217 +503,488 @@ function updateGrind(dt) {
   d = Math.atan2(Math.sin(d), Math.cos(d));
   G.shownAngle += d * (1 - 0.00001 ** dt);
   G.crank.rotation.y = -G.shownAngle;
+  G.moving = Math.max(0, G.moving - dt);
 
-  const gh = Math.max(0.001, 0.72 * G.p);
+  const gh = Math.max(0.001, 0.68 * G.p);
   G.grounds.scale.y = gh;
-  G.grounds.position.y = 0.04 + gh / 2;
-  const bh = Math.max(0.001, 0.44 * (1 - G.p));
-  G.beans.scale.y = bh;
-  G.beans.position.y = 1.79 + bh / 2;
-  G.beans.visible = G.p < 0.995;
-  G.ring.rotation.y = lerp(G.ring.rotation.y, (G.size - 5) * 0.35, 1 - 0.001 ** dt);
+  G.grounds.position.y = 0.065;
+  G.beans.count = Math.round(HOPPER_BEANS * (1 - G.p));
+  G.ring.rotation.y = lerp(G.ring.rotation.y, -(G.size - 1) * (TAU / 10), 1 - 0.001 ** dt);
+
+  // 轉動時細粉從刀盤掉下來
+  G.dust.visible = G.moving > 0 && G.p < 1;
+  if (G.dust.visible) {
+    const top = 0.065 + gh;
+    const p = G.dustGeo.attributes.position;
+    G.dustSeed.forEach((s, i) => {
+      s[2] = (s[2] + dt * 1.6) % 1;
+      p.setXYZ(i, Math.cos(s[0]) * s[1], lerp(0.82, top, s[2]), Math.sin(s[0]) * s[1]);
+    });
+    p.needsUpdate = true;
+  }
 }
 
-/* ---------- 場景三：注水 ---------- */
+/* ==========================================================
+   濾杯組（濕濾紙和注水共用）
+   ========================================================== */
 
-const B = { st: null, bubbles: [], coffee: 0, tilt: -0.15, dripT: 0, steam: [] };
-
-// 三款濾杯的尺寸
+// 三款濾杯：濾紙的錐形剖面、粉床高度
 const DRIPPERS = {
-  v60: { bedY: 1.95, bedR: 0.74, cup: [[0.16, 1.34], [0.2, 1.36], [1.0, 2.2], [1.04, 2.2]], paper: [[0.14, 1.4], [0.98, 2.28]] },
-  kalita: { bedY: 1.8, bedR: 0.77, cup: [[0.5, 1.34], [0.56, 1.36], [0.95, 2.1], [0.99, 2.1]], paper: [[0.5, 1.4], [0.93, 2.18]] },
-  chemex: { bedY: 2.0, bedR: 0.75, paper: [[0.3, 1.5], [0.97, 2.33]] },
+  v60: { bedY: 1.95, paper: [[0.14, 1.42], [1.0, 2.3]], seg: 64 },
+  kalita: { bedY: 1.8, paper: [[0.5, 1.42], [0.95, 2.2]], seg: 120, wave: true },
+  chemex: { bedY: 2.0, paper: [[0.3, 1.5], [0.97, 2.33]], seg: 8 },
 };
+const paperR = (d, y) => {
+  const [[r0, y0], [r1, y1]] = d.paper;
+  return r0 + ((y - y0) / (y1 - y0)) * (r1 - r0);
+};
+const PAPER_DRY = new THREE.Color(0xfffbf2);
+const PAPER_WET = new THREE.Color(0xae8d63);
 
 function buildKettle() {
   // 原點在壺嘴尖端，這樣只要把整支壺移到注水點上方就好
   const k = new THREE.Group();
-  const steel = toon(0x6b7684);
+  k.scale.setScalar(0.85);
+  const body = steel(0.2, 0xe4e7ea);
   const spout = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.14, 0.06, 0), new THREE.Vector3(0.5, -0.08, 0),
-    new THREE.Vector3(0.85, -0.5, 0), new THREE.Vector3(1.08, -0.72, 0),
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.14, 0.05, 0), new THREE.Vector3(0.5, -0.06, 0),
+    new THREE.Vector3(0.86, -0.46, 0), new THREE.Vector3(1.12, -0.8, 0),
   ]);
-  k.add(mesh(new THREE.TubeGeometry(spout, 24, 0.05, 10), steel, 0, 0, 0, true));
-  k.add(mesh(lathe([[0.02, 0], [0.55, 0], [0.6, 0.1], [0.5, 0.85], [0.3, 0.9]]), steel, 1.55, -0.9, 0, true));
-  k.add(mesh(cyl(0.32, 0.32, 0.06), toon(0x4a4f57), 1.55, 0.03, 0, true));
-  k.add(mesh(new THREE.SphereGeometry(0.08, 12, 10), toon(0xe2725b), 1.55, 0.12, 0, true));
-  const handle = mesh(new THREE.TorusGeometry(0.38, 0.055, 8, 20, Math.PI), toon(0x4a4f57), 2.08, -0.42, 0, true);
-  handle.rotation.z = -Math.PI / 2;
-  k.add(handle);
+  k.add(mesh(taperedTube(spout, 40, 16, 0.026, 0.065), body));
+  k.add(mesh(lathe([[0.001, 0], [0.55, 0], [0.6, 0.03], [0.62, 0.12], [0.61, 0.66], [0.55, 0.8], [0.4, 0.86], [0.36, 0.88], [0.001, 0.88]]),
+    body, 1.55, -0.95, 0));
+  k.add(mesh(cyl(0.6, 0.6, 0.035, 64), steel(0.35, 0xb9bec4), 1.55, -0.93, 0));
+  k.add(mesh(cyl(0.34, 0.34, 0.04, 48), steel(0.25), 1.55, -0.06, 0));
+  k.add(mesh(lathe([[0.001, 0], [0.06, 0], [0.09, 0.05], [0.07, 0.11], [0.001, 0.12]], 32), wood(0x6b4428, 0.45), 1.55, -0.04, 0));
+  const handle = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(2.1, -0.2, 0), new THREE.Vector3(2.42, -0.28, 0), new THREE.Vector3(2.5, -0.55, 0),
+    new THREE.Vector3(2.38, -0.8, 0), new THREE.Vector3(2.12, -0.84, 0),
+  ]);
+  k.add(mesh(new THREE.TubeGeometry(handle, 32, 0.055, 14), std(0x1e1f22, 0.6)));
   return k;
 }
+
+// 建出濾杯 + 下壺 + 濾紙 + 手沖壺，回傳之後要動畫的部件
+function buildStation(g, game) {
+  const id = game.dripper ? game.dripper.id : 'v60';
+  const d = DRIPPERS[id];
+  const color = new THREE.Color(game.dripper ? game.dripper.color : '#e2725b');
+  const s = { d };
+
+  if (id === 'chemex') {
+    // Chemex：沙漏形玻璃壺 + 木頸圈 + 皮繩
+    g.add(mesh(lathe([
+      [0.001, 0], [0.86, 0], [0.93, 0.15], [0.86, 0.72], [0.37, 1.3], [0.37, 1.46], [1.0, 2.3], [1.02, 2.34],
+      [0.98, 2.33], [0.34, 1.46], [0.34, 1.3], [0.82, 0.72], [0.89, 0.15], [0.82, 0.04], [0.001, 0.04],
+    ]), glass(0.2)));
+    g.add(mesh(lathe([[0.53, 1.1], [0.4, 1.27], [0.4, 1.49], [0.53, 1.66]], 48), wood(0xd2a26a, 0.5)));
+    const tie = mesh(new THREE.TorusGeometry(0.405, 0.02, 10, 64), std(0x6b4024, 0.7), 0, 1.38, 0);
+    tie.rotation.x = Math.PI / 2;
+    g.add(tie);
+    g.add(mesh(new THREE.SphereGeometry(0.07, 20, 14), wood(0xe0b47a, 0.4), 0, 1.38, 0.47));
+    s.coffeeR = 0.82;
+    s.coffeeMax = 0.6;
+  } else {
+    // 玻璃下壺：厚度、把手、刻度線
+    g.add(mesh(lathe([
+      [0.001, 0], [0.76, 0], [0.8, 0.06], [0.8, 0.9], [0.56, 1.18], [0.56, 1.3], [0.53, 1.3], [0.53, 1.19],
+      [0.77, 0.9], [0.77, 0.07], [0.73, 0.04], [0.001, 0.04],
+    ]), glass(0.2)));
+    const h = mesh(new THREE.TorusGeometry(0.28, 0.045, 12, 32, Math.PI), glass(0.3), 0.98, 0.55, 0);
+    h.rotation.z = -Math.PI / 2;
+    g.add(h);
+    [0.25, 0.45, 0.65].forEach((y) => {
+      const t = mesh(new THREE.BoxGeometry(0.16, 0.012, 0.01), std(0xffffff, 0.5), -0.15, y, 0.805);
+      g.add(t);
+    });
+
+    // 濾杯：陶瓷（有厚度）+ 底座 + 把手
+    const cupPts = id === 'kalita'
+      ? [[0.52, 1.36], [0.58, 1.36], [1.0, 2.12], [1.02, 2.16], [0.98, 2.17], [0.95, 2.13], [0.53, 1.41]]
+      : [[0.18, 1.36], [0.24, 1.36], [1.08, 2.2], [1.1, 2.24], [1.06, 2.26], [1.02, 2.23], [0.17, 1.41]];
+    const mat = ceramic(color);
+    mat.side = THREE.DoubleSide;
+    g.add(mesh(lathe(cupPts, 72), mat));
+    g.add(mesh(lathe([[0.45, 1.3], [0.86, 1.3], [0.88, 1.33], [0.86, 1.36], [0.45, 1.36]], 72), mat));
+    g.add(mesh(cyl(0.5, 0.5, 0.1, 48), mat, 0, 1.26, 0));
+    const handle = mesh(new THREE.TorusGeometry(0.2, 0.055, 14, 24, Math.PI), mat, id === 'kalita' ? -0.95 : -0.9, 1.78, 0);
+    handle.rotation.z = Math.PI / 2;
+    g.add(handle);
+    s.coffeeR = 0.75;
+    s.coffeeMax = 0.8;
+  }
+
+  // 下壺裡的液體：側面深色、頂面稍淡
+  s.liquidMats = [
+    phys({ color: 0x2a1205, roughness: 0.12, clearcoat: 1, transparent: true, opacity: 0.97, envMapIntensity: 0.35 }),
+    phys({ color: 0x5a2e14, roughness: 0.08, clearcoat: 1, transparent: true, opacity: 0.97, envMapIntensity: 0.5 }),
+  ];
+  s.liquid = mesh(new THREE.CylinderGeometry(s.coffeeR, s.coffeeR, 1, 48), [s.liquidMats[0], s.liquidMats[1], s.liquidMats[0]]);
+  s.liquid.visible = false;
+  g.add(s.liquid);
+  s.drip = mesh(new THREE.SphereGeometry(0.04, 12, 10), phys({ color: 0x3a1a08, roughness: 0.1, clearcoat: 1 }));
+  s.drip.scale.y = 1.5;
+  s.drip.visible = false;
+  g.add(s.drip);
+  s.dripY = 1.3;
+  s.dripT = 0;
+  s.level = 0;
+
+  // 濾紙：頂點色決定乾濕；Kalita 是波浪紙、Chemex 是摺疊的多邊形紙
+  const paperGeo = lathe(d.paper.concat([[d.paper[1][0] + 0.03, d.paper[1][1] + 0.02]]), d.seg);
+  const pp = paperGeo.attributes.position;
+  s.paperAngles = new Float32Array(pp.count);
+  for (let i = 0; i < pp.count; i++) {
+    const x = pp.getX(i);
+    const z = pp.getZ(i);
+    const a = Math.atan2(z, x);
+    s.paperAngles[i] = a;
+    if (d.wave) {
+      const k = 1 + 0.045 * Math.sin(a * 20) * clamp01((pp.getY(i) - 1.5) / 0.6);
+      pp.setX(i, x * k);
+      pp.setZ(i, z * k);
+    }
+  }
+  paperGeo.computeVertexNormals();
+  paperGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pp.count * 3).fill(1), 3));
+  s.paperGeo = paperGeo;
+  s.paper = mesh(paperGeo, std(0xffffff, 0.95, 0, { map: paperTex, vertexColors: true, side: THREE.DoubleSide }));
+  g.add(s.paper);
+  // 濾紙底部（封住錐形底端）
+  s.paperBottomMat = std(0xffffff, 0.95, 0, { map: paperTex, side: THREE.DoubleSide });
+  const bottom = mesh(new THREE.CircleGeometry(d.paper[0][0] + 0.005, d.seg), s.paperBottomMat, 0, d.paper[0][1], 0);
+  bottom.rotation.x = -Math.PI / 2;
+  g.add(bottom);
+  s.wet = new Float32Array(48);
+  setPaperWet(s, game.rinsed ? 1 : 0);
+
+  // 手沖壺和水柱
+  s.kettle = buildKettle();
+  g.add(s.kettle);
+  s.stream = mesh(new THREE.CylinderGeometry(0.022, 0.034, 1, 16, 1, true), phys({
+    color: 0xe8f6ff, roughness: 0.02, transparent: true, opacity: 0.6, clearcoat: 1, envMapIntensity: 2.5,
+  }));
+  s.stream.visible = false;
+  g.add(s.stream);
+  s.tilt = -0.15;
+
+  // 熱氣
+  if (!buildStation.steamTex) {
+    buildStation.steamTex = canvasTex(64, 64, (x) => {
+      const rg = x.createRadialGradient(32, 32, 2, 32, 32, 30);
+      rg.addColorStop(0, 'rgba(255,255,255,.85)');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = rg;
+      x.fillRect(0, 0, 64, 64);
+    });
+  }
+  s.steam = [];
+  for (let i = 0; i < 7; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: buildStation.steamTex, transparent: true, opacity: 0, depthWrite: false }));
+    g.add(sp);
+    s.steam.push(sp);
+  }
+  return s;
+}
+
+// 把濾紙依角度上色：s.wet 是 48 格的乾濕程度（0 乾、1 濕）
+function paintPaper(s) {
+  const col = s.paperGeo.attributes.color;
+  const n = s.wet.length;
+  const c = new THREE.Color();
+  for (let i = 0; i < col.count; i++) {
+    const f = (((((s.paperAngles[i] + Math.PI) / TAU) * n) % n) + n) % n;
+    const a = Math.floor(f) % n;
+    const b = (a + 1) % n;
+    const w = lerp(s.wet[a], s.wet[b], f - Math.floor(f));
+    c.copy(PAPER_DRY).lerp(PAPER_WET, w);
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  col.needsUpdate = true;
+  const avg = s.wet.reduce((x, y) => x + y, 0) / n;
+  s.paperBottomMat.color.copy(PAPER_DRY).lerp(PAPER_WET, avg);
+}
+function setPaperWet(s, v) {
+  s.wet.fill(v);
+  paintPaper(s);
+}
+
+// 手沖壺：嘴尖移到 (x, tipY, z)，注水時傾斜，水柱落到 (x, landY, z)
+function moveKettle(s, x, z, tipY, landY, pouring, dt, yaw = 1.0) {
+  const k = 1 - 0.0001 ** dt;
+  s.kettle.position.x = lerp(s.kettle.position.x, x, k);
+  s.kettle.position.z = lerp(s.kettle.position.z, z, k);
+  s.kettle.position.y = tipY;
+  s.tilt = lerp(s.tilt, pouring ? 0.32 : -0.15, 1 - 0.002 ** dt);
+  s.kettle.rotation.z = s.tilt;
+  s.kettle.rotation.y = yaw; // 壺身轉到後方，才不會擋住濾杯
+  s.kettle.visible = view !== 'top'; // 俯視時壺會擋住畫面
+  s.stream.visible = pouring;
+  if (pouring) {
+    const h = tipY - landY;
+    s.stream.scale.set(1 + Math.sin(performance.now() / 60) * 0.06, h, 1);
+    s.stream.position.set(s.kettle.position.x, (tipY + landY) / 2, s.kettle.position.z);
+  }
+}
+
+// 下壺的液體高度、滴落
+function updateLiquid(s, target, dt, water) {
+  s.level = lerp(s.level, target, 1 - 0.5 ** dt);
+  const h = Math.max(0.001, s.coffeeMax * s.level);
+  s.liquid.scale.y = h;
+  s.liquid.position.y = 0.045 + h / 2;
+  s.liquid.visible = s.level > 0.008;
+  const dripping = target > 0.01 && s.level < target + 0.2 && water;
+  s.drip.visible = dripping;
+  if (dripping) {
+    s.dripT = (s.dripT + dt * 2.6) % 1;
+    s.drip.position.set(0, lerp(s.dripY, 0.045 + h, s.dripT * s.dripT), 0);
+  }
+}
+
+function updateSteam(s, now, on, y) {
+  s.steam.forEach((sp, i) => {
+    const ph = (now / 3200 + i / s.steam.length) % 1;
+    sp.position.set(-0.55 + i * 0.18 + Math.sin(now / 650 + i * 2) * 0.08, y + ph * 1.5, -0.25 + Math.cos(i * 1.7) * 0.15);
+    sp.scale.setScalar(0.18 + ph * 0.42);
+    sp.material.opacity = on ? Math.sin(ph * Math.PI) * 0.16 : 0;
+  });
+}
+
+/* ==========================================================
+   場景三：濕濾紙
+   ========================================================== */
+
+const R = { s: null, angle: -Math.PI / 2, pouring: false, p: 0, water: 0 };
+
+function buildRinse(game) {
+  const g = groups.rinse;
+  disposeGroup(g);
+  R.s = buildStation(g, Object.assign({}, game, { rinsed: false }));
+  R.s.liquidMats[0].color.set(0xcfe6ee);
+  R.s.liquidMats[1].color.set(0xe6f4f8);
+  R.s.liquidMats.forEach((m) => { m.opacity = 0.45; });
+  R.s.drip.material.color.set(0xd6eef6);
+  R.s.drip.material.transparent = true;
+  R.s.drip.material.opacity = 0.7;
+  R.s.kettle.position.set(0, R.s.d.bedY + 1.6, -0.6);
+  R.angle = -Math.PI / 2;
+  R.pouring = false;
+  R.p = 0;
+  R.water = 0;
+  shadows(g);
+}
+
+function updateRinse(dt, now) {
+  const s = R.s;
+  const d = s.d;
+  // 沿著濾紙內壁繞圈注水
+  const ry = d.paper[1][1] - 0.25;
+  const rr = paperR(d, ry) * 0.8;
+  const x = Math.cos(R.angle) * rr;
+  const z = Math.sin(R.angle) * rr;
+  moveKettle(s, x, z, ry + 1.3, ry, R.pouring, dt, 1.0);
+
+  if (R.pouring) {
+    R.water = Math.min(1, R.water + dt * 0.25);
+    const n = s.wet.length;
+    const i = Math.round(((R.angle + Math.PI) / TAU) * n) % n;
+    for (let k = -2; k <= 2; k++) {
+      const j = (i + k + n) % n;
+      s.wet[j] = Math.min(1, s.wet[j] + dt * (k === 0 ? 9 : 5));
+    }
+  }
+  const n = s.wet.length;
+  const spread = s.wet.slice();
+  for (let j = 0; j < n; j++) {
+    const nb = Math.max(spread[(j + 1) % n], spread[(j + n - 1) % n]);
+    if (nb > spread[j]) s.wet[j] = Math.min(nb, spread[j] + dt * 0.6);
+  }
+  if (R.p >= 1) for (let j = 0; j < s.wet.length; j++) s.wet[j] = Math.min(1, s.wet[j] + dt * 0.8);
+  paintPaper(s);
+  updateLiquid(s, R.water * 0.18, dt, R.water > 0);
+  updateSteam(s, now, R.water > 0, d.bedY - 0.2);
+}
+
+/* ==========================================================
+   場景四：注水
+   ========================================================== */
+
+const B = { s: null, st: null, bubbles: [], ripples: [], rippleT: 0 };
 
 function buildBrew(game) {
   const g = groups.brew;
   disposeGroup(g);
-  const id = game.dripper ? game.dripper.id : 'v60';
-  const d = DRIPPERS[id];
-  const color = new THREE.Color(game.dripper ? game.dripper.color : '#e2725b');
+  const s = buildStation(g, game);
+  const d = s.d;
+  B.s = s;
   B.d = d;
-  g.add(blobShadow(1.05));
+  B.bedR = paperR(d, d.bedY) * 0.97;
 
-  B.coffeeMat = toon(0x5a2f14);
-  if (id === 'chemex') {
-    // Chemex：沙漏形玻璃壺，濾杯和下壺一體
-    g.add(mesh(lathe([[0.02, 0], [0.85, 0], [0.92, 0.15], [0.85, 0.7], [0.36, 1.3], [0.36, 1.45], [1.0, 2.3]]), glass(0xdff1f5, 0.32)));
-    g.add(mesh(lathe([[0.53, 1.12], [0.4, 1.28], [0.4, 1.47], [0.53, 1.63]], 32), toon(0xb56a22), 0, 0, 0, true));
-    g.add(mesh(new THREE.SphereGeometry(0.07, 10, 8), toon(0xe9c896), 0, 1.38, 0.47));
-    B.coffeeR = 0.84;
-    B.coffeeMax = 0.6;
-    B.dripY = 1.3;
-  } else {
-    // 玻璃下壺 + 濾杯
-    g.add(mesh(lathe([[0.02, 0], [0.75, 0], [0.8, 0.1], [0.8, 0.9], [0.55, 1.2], [0.55, 1.3]]), glass(0xdff1f5, 0.32)));
-    g.add(mesh(cyl(0.82, 0.82, 0.07, 36), toon(color), 0, 1.32, 0, true));
-    g.add(mesh(lathe(d.cup), toon(color, { side: THREE.DoubleSide }), 0, 0, 0, true));
-    const handle = mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 16, Math.PI), toon(color), -0.86, 1.78, 0, true);
-    handle.rotation.z = Math.PI / 2;
-    g.add(handle);
-    B.coffeeR = 0.76;
-    B.coffeeMax = 0.8;
-    B.dripY = 1.3;
+  // 粉床：多圈頂點，可以做出悶蒸鼓起、注水後下凹
+  const bedGeo = new THREE.RingGeometry(0.001, B.bedR, 64, 14);
+  B.bedBase = bedGeo.attributes.position.array.slice();
+  const bp = bedGeo.attributes.position;
+  B.bedNoise = new Float32Array(bp.count);
+  for (let i = 0; i < bp.count; i++) {
+    const x = bp.getX(i);
+    const y = bp.getY(i);
+    const r = Math.hypot(x, y) / B.bedR;
+    B.bedNoise[i] = (Math.sin(x * 37.1 + y * 11.7) * Math.cos(y * 29.3 - x * 7.9)) * 0.008 * Math.min(1, r * 4);
   }
-  B.coffeeMesh = mesh(cyl(B.coffeeR, B.coffeeR, 1, 32), B.coffeeMat);
-  g.add(B.coffeeMesh);
-
-  // 濾紙、粉床、水面
-  g.add(mesh(lathe(d.paper), toon(0xfffaf0, { side: THREE.DoubleSide })));
-  B.bedMat = toon(0x8b5a34);
-  B.bed = mesh(new THREE.CircleGeometry(d.bedR, 40), B.bedMat, 0, d.bedY, 0);
+  B.bedGeo = bedGeo;
+  B.bedMat = std(0x8b5a34, 0.95, 0, { map: grainTex, bumpMap: grainTex, bumpScale: 2.5 });
+  B.bed = mesh(bedGeo, B.bedMat, 0, d.bedY, 0);
   B.bed.rotation.x = -Math.PI / 2;
   g.add(B.bed);
-  B.waterMat = new THREE.MeshPhongMaterial({ color: 0xc48c54, transparent: true, opacity: 0, shininess: 140, depthWrite: false });
-  const water = mesh(new THREE.CircleGeometry(d.bedR * 0.98, 40), B.waterMat, 0, d.bedY + 0.02, 0);
-  water.rotation.x = -Math.PI / 2;
-  g.add(water);
+
+  // 水面
+  B.waterMat = phys({ color: 0x2e1608, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.05, transparent: true, opacity: 0, depthWrite: false, envMapIntensity: 0.9 });
+  B.water = mesh(new THREE.CircleGeometry(1, 64), B.waterMat, 0, d.bedY, 0);
+  B.water.rotation.x = -Math.PI / 2;
+  g.add(B.water);
 
   // 引導圈、邊緣警告
-  B.guide = mesh(new THREE.TorusGeometry(d.bedR * 0.48, 0.012, 6, 48), flat(0xfffaf0, 0.65), 0, d.bedY + 0.035, 0);
+  const ringMat = (color, o) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: o, depthWrite: false, toneMapped: false });
+  B.guide = mesh(new THREE.TorusGeometry(B.bedR * 0.48, 0.01, 8, 64), ringMat(0xfffaf0, 0.6), 0, d.bedY + 0.05, 0);
   B.guide.rotation.x = Math.PI / 2;
   g.add(B.guide);
-  B.edge = mesh(new THREE.TorusGeometry(d.bedR * 0.94, 0.035, 6, 48), flat(0xe2463a, 0.9), 0, d.bedY + 0.04, 0);
+  B.edge = mesh(new THREE.TorusGeometry(B.bedR * 0.94, 0.03, 8, 64), ringMat(0xe2463a, 0.9), 0, d.bedY + 0.06, 0);
   B.edge.rotation.x = Math.PI / 2;
   g.add(B.edge);
 
-  // 泡泡（重複使用固定數量）
+  // 泡泡：半球形、有反光；漣漪：擴散的圓環
   B.bubbles = [];
-  const bubbleGeo = new THREE.CircleGeometry(0.07, 12);
-  for (let i = 0; i < 40; i++) {
-    const m = mesh(bubbleGeo, flat(0xf0cd96, 0.8), 0, d.bedY + 0.03, 0);
+  const bubbleGeo = new THREE.SphereGeometry(0.05, 14, 8, 0, TAU, 0, Math.PI / 2);
+  const bubbleMat = phys({ color: 0x9c6a3c, roughness: 0.25, clearcoat: 0.6, clearcoatRoughness: 0.2, transparent: true, opacity: 0.8, envMapIntensity: 0.7 });
+  for (let i = 0; i < 46; i++) {
+    const m = mesh(bubbleGeo, bubbleMat);
+    m.visible = false;
+    g.add(m);
+    B.bubbles.push({ m, life: 0, size: 1 });
+  }
+  B.ripples = [];
+  const rippleGeo = new THREE.RingGeometry(0.92, 1, 48);
+  for (let i = 0; i < 6; i++) {
+    const m = mesh(rippleGeo, ringMat(0xffffff, 0));
     m.rotation.x = -Math.PI / 2;
     m.visible = false;
     g.add(m);
-    B.bubbles.push({ m, life: 0 });
-  }
-
-  // 手沖壺、水柱、滴落的咖啡
-  B.kettle = buildKettle();
-  g.add(B.kettle);
-  B.stream = mesh(cyl(0.028, 0.045, 1, 8), flat(0xbfe3f5, 0.88));
-  g.add(B.stream);
-  B.drip = mesh(new THREE.SphereGeometry(0.045, 8, 8), toon(0x5a2f14));
-  g.add(B.drip);
-
-  // 熱氣
-  if (!B.steamTex) {
-    const c = document.createElement('canvas');
-    c.width = 64;
-    c.height = 64;
-    const x = c.getContext('2d');
-    const rg = x.createRadialGradient(32, 32, 2, 32, 32, 30);
-    rg.addColorStop(0, 'rgba(255,255,255,.9)');
-    rg.addColorStop(1, 'rgba(255,255,255,0)');
-    x.fillStyle = rg;
-    x.fillRect(0, 0, 64, 64);
-    B.steamTex = new THREE.CanvasTexture(c);
-  }
-  B.steam = [];
-  for (let i = 0; i < 5; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: B.steamTex, transparent: true, opacity: 0, depthWrite: false }));
-    g.add(s);
-    B.steam.push(s);
+    B.ripples.push({ m, life: 0 });
   }
 
   B.st = null;
-  B.coffee = 0;
-  B.tilt = -0.15;
-  B.kettle.position.set(0.3, d.bedY + 1.15, 0);
+  B.bloom = 0;
+  s.kettle.position.set(0.3, d.bedY + 1.45, 0);
+  shadows(g);
+  B.bed.castShadow = false;
+}
+
+function shapeBed(bloom, sink) {
+  const p = B.bedGeo.attributes.position;
+  const base = B.bedBase;
+  const R2 = B.bedR * B.bedR;
+  for (let i = 0; i < p.count; i++) {
+    const x = base[i * 3];
+    const y = base[i * 3 + 1];
+    const f = 1 - (x * x + y * y) / R2;
+    p.setZ(i, f * (bloom * 0.09 - sink * 0.06) + B.bedNoise[i]);
+  }
+  p.needsUpdate = true;
+  B.bedGeo.computeVertexNormals();
 }
 
 function updateBrew(dt, now) {
+  const s = B.s;
   const d = B.d;
   const st = B.st || { px: C, py: C, pouring: false, water: 0, total: 1, pool: 0, onEdge: false, phase: 'pour' };
-  const wx = ((st.px - C) / BED_R) * d.bedR;
-  const wz = ((st.py - C) / BED_R) * d.bedR;
-  const k = 1 - 0.0001 ** dt;
+  const wx = ((st.px - C) / BED_R) * B.bedR;
+  const wz = ((st.py - C) / BED_R) * B.bedR;
+  const wet = clamp01(st.water / st.total);
 
-  // 手沖壺跟著手指，注水時傾斜
-  const tipY = d.bedY + 1.15;
-  B.kettle.position.x = lerp(B.kettle.position.x, wx, k);
-  B.kettle.position.z = lerp(B.kettle.position.z, wz, k);
-  B.kettle.position.y = tipY;
-  B.tilt = lerp(B.tilt, st.pouring ? 0.32 : -0.15, 1 - 0.002 ** dt);
-  B.kettle.rotation.z = B.tilt;
-  B.kettle.rotation.y = 1.0; // 壺身轉到右後方，才不會擋住粉床
-  B.kettle.visible = view !== 'top'; // 俯視時壺會擋住粉床
+  // 水面高度隨積水上升，半徑跟著錐形變大
+  const wy = d.bedY + 0.03 + st.pool * 0.16;
+  const wr = paperR(d, wy) * 0.985;
+  B.water.position.y = wy;
+  B.water.scale.set(wr, wr, 1);
+  B.waterMat.opacity = st.pool * 0.7;
 
-  // 水柱
-  B.stream.visible = st.pouring;
-  if (st.pouring) {
-    B.stream.scale.y = tipY - d.bedY;
-    B.stream.position.set(B.kettle.position.x, (tipY + d.bedY) / 2, B.kettle.position.z);
+  moveKettle(s, wx, wz, d.bedY + 1.45, wy, st.pouring, dt, 1.0);
+
+  // 粉床：越濕越深；悶蒸時鼓起，後段下凹
+  const soak = clamp01(st.water / 45);
+  B.bedMat.color.setRGB(lerp(0.4, 0.17, soak), lerp(0.25, 0.09, soak), lerp(0.14, 0.05, soak));
+  const target = clamp01(st.water / 30) * (1 - clamp01((st.water - 30) / 70));
+  B.bloom = lerp(B.bloom, target, 1 - 0.2 ** dt);
+  shapeBed(B.bloom, wet);
+
+  B.guide.visible = st.phase === 'pour';
+  B.guide.position.y = wy + 0.02;
+  B.edge.visible = st.onEdge;
+  B.edge.position.y = wy + 0.03;
+
+  // 濾紙被水沾濕的高度
+  if (wet > 0) {
+    const col = s.paperGeo.attributes.color;
+    const pos = s.paperGeo.attributes.position;
+    const c = new THREE.Color();
+    const wetTop = wy + 0.08 + wet * 0.25;
+    const base = s.wet[0];
+    for (let i = 0; i < col.count; i++) {
+      const w = Math.max(base, pos.getY(i) < wetTop ? 1 : 0);
+      c.copy(PAPER_DRY).lerp(PAPER_WET, w);
+      col.setXYZ(i, c.r, c.g, c.b);
+    }
+    col.needsUpdate = true;
   }
 
-  // 粉床越濕越深、水面反光
-  const wet = clamp01(st.water / st.total);
-  B.bedMat.color.setRGB(lerp(0.55, 0.26, wet), lerp(0.35, 0.15, wet), lerp(0.2, 0.08, wet));
-  B.waterMat.opacity = st.pool * 0.6;
-  B.guide.visible = st.phase === 'pour';
-  B.edge.visible = st.onEdge;
-
   // 泡泡
-  if (st.pouring && Math.random() < 0.6) {
+  if (st.pouring && Math.random() < 0.7) {
     const b = B.bubbles.find((x) => x.life <= 0);
     if (b) {
-      b.life = 1;
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 0.12;
-      b.m.position.x = B.kettle.position.x + Math.cos(a) * r;
-      b.m.position.z = B.kettle.position.z + Math.sin(a) * r;
-      b.m.scale.setScalar(0.5 + Math.random() * 1.1);
-      b.m.visible = true;
+      const a = rand(0, TAU);
+      const r = Math.random() * 0.14;
+      const bx = s.kettle.position.x + Math.cos(a) * r;
+      const bz = s.kettle.position.z + Math.sin(a) * r;
+      if (Math.hypot(bx, bz) < B.bedR * 0.9) {
+        b.life = 1;
+        b.size = rand(0.4, 1.3);
+        b.m.position.set(bx, wy - 0.005, bz);
+        b.m.visible = true;
+      }
     }
   }
   B.bubbles.forEach((b) => {
     if (b.life <= 0) return;
-    b.life -= dt * 0.7;
-    b.m.material.opacity = Math.max(0, b.life) * 0.8;
+    b.life -= dt * 0.6;
+    const grow = Math.min(1, (1 - b.life) * 4);
+    b.m.scale.setScalar(b.size * grow * (b.life < 0.1 ? b.life * 10 : 1));
+    b.m.position.y = wy - 0.005;
     if (b.life <= 0) b.m.visible = false;
-    // 泡泡不要跑出粉床
-    const rr = Math.hypot(b.m.position.x, b.m.position.z);
-    if (rr > d.bedR * 0.95) b.m.visible = false;
   });
 
-  // 下壺的咖啡慢慢變多，咖啡一滴滴落下
-  B.coffee = lerp(B.coffee, wet, 1 - 0.5 ** dt);
-  const h = Math.max(0.001, B.coffeeMax * B.coffee);
-  B.coffeeMesh.scale.y = h;
-  B.coffeeMesh.position.y = 0.03 + h / 2;
-  B.coffeeMesh.visible = B.coffee > 0.01;
-  const dripping = wet > 0.02 && B.coffee < 0.995;
-  B.drip.visible = dripping;
-  if (dripping) {
-    B.dripT = (B.dripT + dt * 2.6) % 1;
-    B.drip.position.set(0, lerp(B.dripY, 0.03 + h, B.dripT * B.dripT), 0);
+  // 漣漪
+  B.rippleT -= dt;
+  if (st.pouring && B.rippleT <= 0) {
+    B.rippleT = 0.18;
+    const r = B.ripples.find((x) => x.life <= 0);
+    if (r) {
+      r.life = 1;
+      r.m.position.set(s.kettle.position.x, wy + 0.004, s.kettle.position.z);
+      r.m.visible = true;
+    }
   }
-
-  // 熱氣
-  B.steam.forEach((s, i) => {
-    const ph = (now / 3000 + i * 0.2) % 1;
-    s.position.set(-0.5 + i * 0.25 + Math.sin(now / 600 + i * 2) * 0.08, d.bedY + 0.2 + ph * 1.5, -0.2);
-    s.scale.setScalar(0.35 + ph * 0.6);
-    s.material.opacity = st.water > 0 ? Math.sin(ph * Math.PI) * 0.35 : 0;
+  B.ripples.forEach((r) => {
+    if (r.life <= 0) return;
+    r.life -= dt * 1.4;
+    const sc = 0.04 + (1 - r.life) * 0.28;
+    r.m.scale.set(sc, sc, 1);
+    r.m.material.opacity = Math.max(0, r.life) * 0.5 * Math.min(1, st.pool * 3 + 0.3);
+    if (r.life <= 0) r.m.visible = false;
   });
+
+  updateLiquid(s, wet, dt, st.water > 0);
+  updateSteam(s, now, st.water > 0, d.bedY + 0.2);
 }
 
 /* ---------- 鏡頭、迴圈 ---------- */
@@ -473,9 +994,10 @@ function setView(v, snap = false) {
   const cfg = VIEWS[mode][v];
   camPos.fromArray(cfg, 0);
   camTarget.fromArray(cfg, 3);
-  if (mode === 'brew' && B.d) {
+  const s = mode === 'brew' ? B.s : mode === 'rinse' ? R.s : null;
+  if (s) {
     // 三款濾杯高度不同，鏡頭跟著粉床高度微調
-    const dy = B.d.bedY - 1.95;
+    const dy = s.d.bedY - 1.95;
     camPos.y += dy;
     camTarget.y += dy;
   }
@@ -514,6 +1036,7 @@ function frame(now) {
   camera.lookAt(lookAt);
   if (mode === 'weigh') updateWeigh(dt);
   else if (mode === 'grind') updateGrind(dt);
+  else if (mode === 'rinse') updateRinse(dt, now);
   else if (mode === 'brew') updateBrew(dt, now);
   renderer.render(scene, camera);
 }
@@ -521,22 +1044,42 @@ function frame(now) {
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.className = 'gl';
 
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
-  scene.add(new THREE.HemisphereLight(0xfff4e0, 0xc09a6a, 1.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-  sun.position.set(-3, 6, 4);
+
+  // 光：室內環境反射 + 一盞投影的主光 + 柔和補光
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  scene.add(new THREE.HemisphereLight(0xfff1dc, 0x8a6a48, 0.25));
+  const sun = new THREE.DirectionalLight(0xfff0dd, 2.8);
+  sun.position.set(-3.5, 7, 4.5);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 20 });
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.02;
   scene.add(sun);
 
   // 圓木桌
-  scene.add(mesh(cyl(4.4, 4.4, 0.3, 56), toon(0xe9c896), 0, -0.15, 0, true));
-  scene.add(mesh(cyl(4.0, 4.0, 0.01, 56), flat(0xdcb67e), 0, 0.003, 0));
+  const top = wood(0xffffff, 0.5);
+  const side = wood(0x9a6a40, 0.6);
+  const table = mesh(cyl(4.4, 4.4, 0.3, 96), [side, top, side], 0, -0.15, 0);
+  table.receiveShadow = true;
+  scene.add(table);
 
   groups.weigh = buildWeigh();
   groups.grind = buildGrind();
+  groups.rinse = new THREE.Group();
   groups.brew = new THREE.Group();
+  shadows(groups.weigh);
+  shadows(groups.grind);
+  G.dust.castShadow = false;
   Object.values(groups).forEach((g) => { g.visible = false; scene.add(g); });
 
   // 視角切換按鈕
@@ -547,7 +1090,7 @@ function init() {
     b.type = 'button';
     b.dataset.v = v;
     b.textContent = name;
-    b.addEventListener('pointerdown', (e) => e.stopPropagation()); // 不要被當成磨豆或注水的手勢
+    b.addEventListener('pointerdown', (e) => e.stopPropagation()); // 不要被當成磨豆、濕濾紙或注水的手勢
     b.addEventListener('click', (e) => { e.stopPropagation(); setView(v); });
     viewsEl.appendChild(b);
   });
@@ -566,6 +1109,7 @@ const api = {
     Object.entries(groups).forEach(([name, g]) => { g.visible = name === m; });
     if (m === 'weigh') resetWeigh(game);
     if (m === 'grind') resetGrind(game);
+    if (m === 'rinse') buildRinse(game);
     if (m === 'brew') buildBrew(game);
     host.appendChild(renderer.domElement);
     host.appendChild(viewsEl);
@@ -586,9 +1130,15 @@ const api = {
   setWeigh(grams, pouring) { W.grams = grams; W.pouring = pouring; },
 
   setGrind({ angle, p, size }) {
-    if (angle !== undefined) G.angle = angle;
+    if (angle !== undefined) { G.angle = angle; G.moving = 0.25; }
     if (p !== undefined) G.p = p;
     if (size !== undefined) G.size = size;
+  },
+
+  setRinse({ angle, p, pouring }) {
+    if (angle !== undefined) R.angle = angle;
+    if (p !== undefined) R.p = p;
+    if (pouring !== undefined) R.pouring = pouring;
   },
 
   setBrew(st) { B.st = st; },
@@ -599,9 +1149,9 @@ const api = {
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     camera.updateMatrixWorld();
     raycaster.setFromCamera(ndc, camera);
-    const hit = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -B.d.bedY), new THREE.Vector3());
+    const hit = raycaster.ray.intersectPlane(new THREE.Plane(UP, -B.d.bedY), new THREE.Vector3());
     if (!hit) return { x: -9999, y: -9999 };
-    return { x: C + (hit.x / B.d.bedR) * BED_R, y: C + (hit.z / B.d.bedR) * BED_R };
+    return { x: C + (hit.x / B.bedR) * BED_R, y: C + (hit.z / B.bedR) * BED_R };
   },
 
   shake() { shakeT = 0.6; },

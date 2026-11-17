@@ -66,10 +66,12 @@ function show(id) {
   const watching = ['s-weigh', 's-grind', 's-rinse', 's-brew'].includes(id);
   $('boss').hidden = !watching;
   if (watching && !$('boss').classList.contains('rage')) $('boss-cat').innerHTML = catSvg('watch');
-  // 秤豆、磨豆、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
+  // 秤豆、磨豆、濕濾紙、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
   if (window.Scene3D) {
-    const hosts = { 's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-brew': ['brew-wrap', 'brew'] };
-    if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], game);
+    const hosts = {
+      's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-rinse': ['rinse', 'rinse'], 's-brew': ['brew-wrap', 'brew'],
+    };
+    if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], Object.assign({}, game, { rinsed: result.rinsed }));
     else Scene3D.unmount();
   }
 }
@@ -497,15 +499,16 @@ function startRinse() {
   $('btn-rinse-done').disabled = true;
   show('s-rinse');
 }
-trackSpin($('rinse'), (d) => {
+trackSpin($('rinse'), (d, a) => {
   rinse.total += Math.abs(d);
   const p = clamp(rinse.total / (2 * Math.PI));
   $('rinse-wet').style.strokeDashoffset = 440 * (1 - p);
+  if (window.Scene3D) Scene3D.setRinse({ angle: a, p, pouring: true });
   if (p >= 1 && $('btn-rinse-done').disabled) {
     $('btn-rinse-done').disabled = false;
     beep(880, 0.15);
   }
-});
+}, () => { if (window.Scene3D) Scene3D.setRinse({ pouring: false }); });
 $('btn-rinse-skip').addEventListener('click', () => { result.rinsed = false; startBrew(); bossRage('竟敢跳過？！'); });
 $('btn-rinse-done').addEventListener('click', () => { result.rinsed = true; beep(); startBrew(); });
 
