@@ -205,7 +205,11 @@ let table;
 // 畫質：觸控裝置（手機、平板）解析度上限 1.5 倍、陰影小一點且隔一幀更新；
 // 不管什麼裝置，連續掉幀就自動把解析度往下降，最低 1 倍
 const LITE = window.matchMedia('(pointer: coarse)').matches;
-const Q = { ratio: Math.min(window.devicePixelRatio || 1, LITE ? 1.5 : 2), warm: 0, n: 0, sum: 0, frame: 0 };
+const Q_MAX = Math.min(window.devicePixelRatio || 1, LITE ? 1.5 : 2);
+let savedQ = 0;
+try { savedQ = +localStorage.getItem('dripdrip.q') || 0; } catch (e) { /* 忽略 */ }
+// 上次降過畫質的話，這次直接從那一階開始，不用再卡一下才降
+const Q = { ratio: savedQ ? Math.min(Q_MAX, Math.max(1, savedQ)) : Q_MAX, warm: 0, n: 0, sum: 0, frame: 0, fast: 0 };
 // 量畫布位置會讓瀏覽器重排版面，手指移動時沿用剛量過的結果
 let rectCache = { r: null, t: 0 };
 const groups = {};
@@ -246,19 +250,23 @@ const VIEW_NAMES = { angle: '斜角', top: '俯視', side: '側面' };
 
 // 袋子尺寸：寬、高、側摺厚度、頂端熱封條高度
 const POUCH = { w: 0.9, h: 1.36, d: 0.5, seal: 0.11 };
+const TEX_SCALE = LITE ? 0.5 : 1; // 手機上豆袋貼圖解析度減半（袋子在螢幕上本來就不大）
 const pouchTexCache = {};
 
 // 袋子的貼圖：一張彩色圖 + 金屬度圖 + 粗糙度圖，燙金的地方會反光、其他地方是霧面
 function pouchTextures(bean) {
   if (pouchTexCache[bean.id]) return pouchTexCache[bean.id];
   const paint = (w, h, draw) => {
-    const cv = [0, 1, 2].map(() => {
+    // 兩張圖：彩色圖，以及「綠色 = 粗糙度、藍色 = 金屬度」合在一起的圖。畫的時候都用原本的座標
+    const cv = [0, 1].map(() => {
       const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
+      c.width = Math.round(w * TEX_SCALE);
+      c.height = Math.round(h * TEX_SCALE);
       return c;
     });
-    const ctx = { map: cv[0].getContext('2d'), metal: cv[1].getContext('2d'), rough: cv[2].getContext('2d') };
+    const ctx = { map: cv[0].getContext('2d'), mr: cv[1].getContext('2d') };
+    ctx.map.scale(TEX_SCALE, TEX_SCALE);
+    ctx.mr.scale(TEX_SCALE, TEX_SCALE);
     // 霧面袋身：底色 + 上亮下暗 + 細小顆粒
     ctx.map.fillStyle = bean.bag;
     ctx.map.fillRect(0, 0, w, h);
@@ -267,17 +275,15 @@ function pouchTextures(bean) {
     gr.addColorStop(1, 'rgba(0,0,0,.12)');
     ctx.map.fillStyle = gr;
     ctx.map.fillRect(0, 0, w, h);
-    for (let i = 0; i < (w * h) / 40; i++) {
+    for (let i = 0; i < (w * h) / 60; i++) {
       ctx.map.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},${rand(0.02, 0.05)})`;
       ctx.map.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
     }
-    ctx.metal.fillStyle = '#000';
-    ctx.metal.fillRect(0, 0, w, h);
-    ctx.rough.fillStyle = '#d0d0d0';
-    ctx.rough.fillRect(0, 0, w, h);
-    // foil(fn)：同一個圖形同時畫在三張圖上，就是燙金
+    ctx.mr.fillStyle = 'rgb(0,208,0)';
+    ctx.mr.fillRect(0, 0, w, h);
+    // foil(fn)：同一個圖形同時畫在兩張圖上，就是燙金
     const foil = (fn) => {
-      [['map', bean.foil], ['metal', '#ffffff'], ['rough', '#4a4a4a']].forEach(([k, col]) => {
+      [['map', bean.foil], ['mr', 'rgb(0,74,255)']].forEach(([k, col]) => {
         const x = ctx[k];
         x.save();
         x.fillStyle = col;
@@ -293,7 +299,7 @@ function pouchTextures(bean) {
       t.anisotropy = 8;
       return t;
     };
-    return { map: tex(cv[0], true), metal: tex(cv[1], false), rough: tex(cv[2], false) };
+    return { map: tex(cv[0], true), mr: tex(cv[1], false) };
   };
 
   // 正面：Estate Coffee、產地、燙金圓形徽章、重量
@@ -413,7 +419,7 @@ function buildPouch(bean, { open = false } = {}) {
   const { w, h, d, seal } = POUCH;
   const T = pouchTextures(bean);
   const mat = (t) => phys({
-    map: t.map, metalnessMap: t.metal, roughnessMap: t.rough, metalness: 1, roughness: 1,
+    map: t.map, metalnessMap: t.mr, roughnessMap: t.mr, metalness: 1, roughness: 1,
     sheen: 0.15, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xffffff), envMapIntensity: 0.55,
   });
   const topK = (y) => ease(clamp01((y / h - 0.72) / 0.28));
@@ -562,13 +568,12 @@ function shelfItem(kind, item) {
   return g;
 }
 
-function resetShelf(data) {
-  const kind = data.kind || 'bean';
-  SH.kind = kind;
-  // 每一種只做一次，之後切換顯示就好
-  if (!SH.sets[kind] && data.items) {
+// 每一種只做一次（預熱時也會先做），之後切換顯示就好
+function ensureShelfSet(kind, list) {
+  if (!SH.sets[kind] && list) {
     const group = new THREE.Group();
-    const items = data.items.map((item, i) => {
+    group.visible = false;
+    const items = list.map((item, i) => {
       const obj = shelfItem(kind, item);
       obj.position.set(SHELF_X[i], 0, SHELF_Z);
       const tag = kind === 'bean'
@@ -584,6 +589,13 @@ function resetShelf(data) {
     SH.itemsGroup.add(group);
     SH.sets[kind] = { group, items };
   }
+  return SH.sets[kind];
+}
+
+function resetShelf(data) {
+  const kind = data.kind || 'bean';
+  SH.kind = kind;
+  ensureShelfSet(kind, data.items);
   Object.entries(SH.sets).forEach(([k, set]) => { set.group.visible = k === kind; });
   SH.set = SH.sets[kind] || null;
   SH.items = SH.set ? SH.set.items : [];
@@ -1710,20 +1722,30 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-// 平均每幀超過 26 毫秒（約低於 38 fps）就把解析度降一階；剛掛載的前幾十幀在編譯著色器，不算
+// 每 24 幀看一次平均：超過 26 毫秒（約低於 38 fps）降一階、超過 40 毫秒降兩階；
+// 一直很順（高更新率螢幕）就慢慢升回去。結果記下來，下次打開直接用
+function setQuality(r) {
+  Q.ratio = r;
+  renderer.setPixelRatio(r);
+  resize();
+  try { localStorage.setItem('dripdrip.q', String(r)); } catch (e) { /* 忽略 */ }
+}
 function adaptQuality(raw) {
   Q.frame++;
   if (Q.warm > 0) { Q.warm--; return; }
-  if (!(raw > 0 && raw < 250)) return; // 切到背景之類的長停頓不算
+  if (!(raw > 0 && raw < 100)) return; // 切到背景、偶發的長停頓不算
   Q.sum += raw;
-  if (++Q.n < 45) return;
+  if (++Q.n < 24) return;
   const avg = Q.sum / Q.n;
   Q.n = 0;
   Q.sum = 0;
   if (avg > 26 && Q.ratio > 1) {
-    Q.ratio = Math.max(1, Q.ratio - 0.25);
-    renderer.setPixelRatio(Q.ratio);
-    resize();
+    Q.fast = 0;
+    setQuality(Math.max(1, Q.ratio - (avg > 40 ? 0.5 : 0.25)));
+  } else if (avg < 12 && Q.ratio < Q_MAX) {
+    if (++Q.fast >= 4) { Q.fast = 0; setQuality(Math.min(Q_MAX, Q.ratio + 0.25)); }
+  } else {
+    Q.fast = 0;
   }
 }
 
@@ -1815,6 +1837,60 @@ function init() {
   window.addEventListener('resize', resize);
 }
 
+/* ---------- 預熱 ----------
+   標題畫面閒著的時候，先把各場景的模型做好、著色器編譯好、貼圖傳上顯示卡，
+   之後第一次進到每個 3D 畫面時就不會一開始卡一下。每一小步都等瀏覽器有空才做。 */
+
+let warmStarted = false;
+const whenIdle = () => new Promise((res) => {
+  if (window.requestIdleCallback) window.requestIdleCallback(() => res(), { timeout: 400 });
+  else setTimeout(res, 40);
+});
+
+async function prewarm(data) {
+  if (warmStarted) return;
+  warmStarted = true;
+  // 秤豆用的剪開豆袋先放在一個看不到的群組裡，一起編譯；秤豆時才搬到桌上
+  const hold = new THREE.Group();
+  hold.visible = false;
+  scene.add(hold);
+  await whenIdle();
+  ensureShelfSet('bean', data.beans);
+  await whenIdle();
+  ensureShelfSet('dripper', data.drippers);
+  for (const b of data.beans) {
+    await whenIdle();
+    if (!W.pouches[b.id]) {
+      W.pouches[b.id] = buildPouch(b, { open: true });
+      hold.add(W.pouches[b.id]);
+    }
+  }
+  // 濕濾紙、沖煮：先做一組讓材質編譯好（真的進去時會依選的濾杯重做，但著色器已經編好了）
+  for (const [m, build] of [['rinse', buildRinse], ['brew', buildBrew]]) {
+    await whenIdle();
+    if (mode !== 'rinse' && mode !== 'brew') build({ dripper: data.drippers[0], rinsed: true });
+    if (mode !== m) groups[m].visible = false;
+  }
+  await whenIdle();
+  try {
+    if (renderer.compileAsync) await renderer.compileAsync(scene, camera);
+    else renderer.compile(scene, camera);
+  } catch (e) { /* 預編譯失敗沒關係，第一次畫的時候還是會編譯 */ }
+  // 貼圖一次傳幾張，免得一次卡太久
+  const texs = new Set();
+  scene.traverse((o) => {
+    if (!o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach((mat) => {
+      ['map', 'metalnessMap', 'roughnessMap', 'bumpMap', 'normalMap', 'alphaMap'].forEach((k) => { if (mat[k]) texs.add(mat[k]); });
+    });
+  });
+  let n = 0;
+  for (const t of texs) {
+    if (n++ % 4 === 0) await whenIdle();
+    renderer.initTexture(t);
+  }
+}
+
 /* ---------- 給 game.js 用的介面 ---------- */
 
 const api = {
@@ -1839,7 +1915,7 @@ const api = {
     if (m === 'rinse') buildRinse(game);
     if (m === 'brew') buildBrew(game);
     host.appendChild(renderer.domElement);
-    Q.warm = 30;
+    Q.warm = 12;
     Q.n = 0;
     Q.sum = 0;
     rectCache.r = null;
@@ -1866,6 +1942,8 @@ const api = {
   },
 
   setShelf(i) { selectShelf(i); },
+
+  prewarm(data) { prewarm(data).catch(() => {}); },
 
   setWeigh(grams, pouring) { W.grams = grams; W.pouring = pouring; },
 
@@ -1903,6 +1981,7 @@ try {
   init();
   window.Scene3D = api;
   document.getElementById('app').classList.add('has3d');
+  window.dispatchEvent(new Event('scene3d-ready'));
 } catch (e) {
   console.warn('3D 場景無法啟動，改用 2D 畫面', e);
 }

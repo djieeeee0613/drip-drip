@@ -512,6 +512,8 @@ function showTitle() {
   show('s-title');
 }
 $('btn-start').addEventListener('click', () => { beep(); playBgm(); boss.count = 0; startPick(0); });
+// 3D 場景載入好之後，趁標題畫面閒著先預熱（做模型、編譯著色器、傳貼圖）
+window.addEventListener('scene3d-ready', () => Scene3D.prewarm({ beans: BEANS, drippers: DRIPPERS }));
 
 /* ---------- 背景音樂（資料夾裡有 bgm.mp3 才會出現開關） ---------- */
 
@@ -533,6 +535,31 @@ $('btn-music').addEventListener('click', () => {
   $('btn-music').classList.toggle('off', !bgmOn);
   if (bgmOn) playBgm(); else bgm.pause();
 });
+
+// 離開網頁（切到別的 App、鎖螢幕、換分頁）就暫停音樂和音效，回來再接著播，
+// 不然手機上音樂會在背景一直跑
+let bgmWasPlaying = false;
+function pauseForBackground() {
+  if (!bgm.paused) {
+    bgmWasPlaying = true;
+    bgm.pause();
+  }
+  if (audioCtx && audioCtx.state === 'running') audioCtx.suspend().catch(() => {});
+}
+function resumeFromBackground() {
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  if (!bgmWasPlaying) return;
+  bgmWasPlaying = false;
+  if (!bgmOn) return;
+  // 有些手機回來時不讓網頁自己播，就等玩家下一次點畫面再播
+  bgm.play().catch(() => window.addEventListener('pointerdown', playBgm, { once: true }));
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pauseForBackground();
+  else resumeFromBackground();
+});
+window.addEventListener('pagehide', pauseForBackground);
+window.addEventListener('pageshow', () => { if (!document.hidden) resumeFromBackground(); });
 
 /* ---------- 選擇 ---------- */
 

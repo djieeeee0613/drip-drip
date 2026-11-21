@@ -478,7 +478,11 @@ html, body {
 @media (pointer: coarse) {
   .bg3d { transition: none; }
   .bg3d i { filter: none !important; box-shadow: none; }
+  /* 換頁：整頁 3D 翻轉時 3D 畫布也要跟著轉，手機吃不消，改成往上淡入 */
+  #app .screen { transform-style: flat; }
+  #app .screen.active { animation: fadeUp .28s ease-out; }
 }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } }
 
 /* 畫面切換：像翻頁一樣轉進來 */
 .screen { transform-style: preserve-3d; }
