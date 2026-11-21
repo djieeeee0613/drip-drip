@@ -55,7 +55,7 @@
     <div class="title-wrap">
       <div class="logo">滴滴手沖<small>Drip Drip</small></div>
       <div class="cat-big" id="title-cat"></div>
-      <p class="bubble">哼，我是店長拿鐵。<br>我會盯著你，沖錯我就生氣喵！</p>
+      <p class="bubble" id="title-say">哼，我是店長拿鐵。<br>我會盯著你，沖錯我就生氣喵！</p>
       <button class="btn big" id="btn-start">開始沖煮</button>
       <p class="dex" id="dex"></p>
     </div>
@@ -98,8 +98,16 @@
     <div class="grinder" id="grinder">
       <div class="grinder-body"><div class="grinder-fill" id="grinder-fill"></div></div>
       <div class="crank" id="crank"><div class="knob"></div></div>
+      <div class="spin-guide" id="grind-guide" aria-hidden="true">
+        <svg viewBox="0 0 100 100">
+          <circle class="spin-ring" cx="50" cy="50" r="46"/>
+          <g class="spin-arrow"><path d="M92 46 L100 46 L96 54 Z"/><path d="M92 46 L100 46 L96 54 Z" transform="rotate(120 50 50)"/><path d="M92 46 L100 46 L96 54 Z" transform="rotate(240 50 50)"/></g>
+        </svg>
+        <div class="spin-orbit"><div class="spin-hand"><img src="icons/finger.svg" alt="" draggable="false"></div></div>
+        <span class="spin-label">手指跟著畫圈</span>
+      </div>
     </div>
-    <p class="hint small" id="grind-status">用手指繞著磨豆機畫圈，速度越穩越均勻</p>
+    <p class="hint small" id="grind-status">手指在磨豆機上畫圈，磨滿就好</p>
     <button class="btn" id="btn-grind-done" disabled>磨好了</button>
   </section>
 
@@ -114,6 +122,14 @@
         <circle cx="100" cy="100" r="70" class="rinse-wet" id="rinse-wet"/>
         <circle cx="100" cy="100" r="14" class="rinse-hole"/>
       </svg>
+      <div class="spin-guide" id="rinse-guide" aria-hidden="true">
+        <svg viewBox="0 0 100 100">
+          <circle class="spin-ring" cx="50" cy="50" r="46"/>
+          <g class="spin-arrow"><path d="M92 46 L100 46 L96 54 Z"/><path d="M92 46 L100 46 L96 54 Z" transform="rotate(120 50 50)"/><path d="M92 46 L100 46 L96 54 Z" transform="rotate(240 50 50)"/></g>
+        </svg>
+        <div class="spin-orbit"><div class="spin-hand"><img src="icons/finger.svg" alt="" draggable="false"></div></div>
+        <span class="spin-label">手指跟著畫圈</span>
+      </div>
     </div>
     <div class="row">
       <button class="btn ghost" id="btn-rinse-skip">跳過</button>

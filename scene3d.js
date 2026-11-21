@@ -202,6 +202,12 @@ let raf = 0;
 let shakeT = 0;
 let last = 0;
 let table;
+// 畫質：觸控裝置（手機、平板）解析度上限 1.5 倍、陰影小一點且隔一幀更新；
+// 不管什麼裝置，連續掉幀就自動把解析度往下降，最低 1 倍
+const LITE = window.matchMedia('(pointer: coarse)').matches;
+const Q = { ratio: Math.min(window.devicePixelRatio || 1, LITE ? 1.5 : 2), warm: 0, n: 0, sum: 0, frame: 0 };
+// 量畫布位置會讓瀏覽器重排版面，手指移動時沿用剛量過的結果
+let rectCache = { r: null, t: 0 };
 const groups = {};
 const camPos = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
@@ -1539,14 +1545,21 @@ function updateBrew(dt, now) {
     for (let k = 0; k < B.bedWet.length; k++) B.bedWet[k] = Math.min(1, B.bedWet[k] + dt * 0.18 * st.pool);
   }
   const drained = st.pool < 0.08;
-  stepField(B.fresh, B.omega, 0, 0.05, 0.6, dt);
-  stepField(B.foam, B.omega, 0.12, 0.015, drained ? 0.9 : 0.2, dt);
-  paintMix();
+  // 手機上把重的計算拆兩半輪流做：這一幀算液面，下一幀算粉床和濾紙（時間有累積，看起來一樣）
+  B.acc = (B.acc || 0) + dt;
+  const heavy = !LITE || (Q.frame & 1) === 0;
+  const light = !LITE || !heavy;
+  if (heavy) {
+    stepField(B.fresh, B.omega, 0, 0.05, 0.6, B.acc);
+    stepField(B.foam, B.omega, 0.12, 0.015, drained ? 0.9 : 0.2, B.acc);
+    B.acc = 0;
+    paintMix();
+  }
 
   // 粉床：悶蒸時吸到水的地方鼓起，後段下凹；剛滴完時表面濕亮
   const target = clamp01(st.water / 30) * (1 - clamp01((st.water - 30) / 70));
   B.bloom = lerp(B.bloom, target, 1 - 0.2 ** dt);
-  shapeBed(B.bloom, wet);
+  if (light) shapeBed(B.bloom, wet);
   B.bedMat.roughness = st.water > 0 ? lerp(0.95, 0.55, clamp01(st.water / 60)) : 0.95;
 
   B.guide.visible = st.phase === 'pour';
@@ -1555,7 +1568,7 @@ function updateBrew(dt, now) {
   B.edge.position.y = wy + 0.03;
 
   // 濾紙：泡過咖啡的高度留下咖啡漬，最高水位有一圈較深的水痕
-  if (st.water > 0) {
+  if (st.water > 0 && light) {
     const col = s.paperGeo.attributes.color;
     const pos = s.paperGeo.attributes.position;
     const c = new THREE.Color();
@@ -1697,10 +1710,29 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+// 平均每幀超過 26 毫秒（約低於 38 fps）就把解析度降一階；剛掛載的前幾十幀在編譯著色器，不算
+function adaptQuality(raw) {
+  Q.frame++;
+  if (Q.warm > 0) { Q.warm--; return; }
+  if (!(raw > 0 && raw < 250)) return; // 切到背景之類的長停頓不算
+  Q.sum += raw;
+  if (++Q.n < 45) return;
+  const avg = Q.sum / Q.n;
+  Q.n = 0;
+  Q.sum = 0;
+  if (avg > 26 && Q.ratio > 1) {
+    Q.ratio = Math.max(1, Q.ratio - 0.25);
+    renderer.setPixelRatio(Q.ratio);
+    resize();
+  }
+}
+
 function frame(now) {
   raf = requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000 || 0.016);
+  const raw = now - last;
+  const dt = Math.min(0.05, raw / 1000 || 0.016);
   last = now;
+  adaptQuality(raw);
   const k = 1 - 0.002 ** dt;
   camera.position.lerp(camPos, k);
   lookAt.lerp(camTarget, k);
@@ -1716,17 +1748,19 @@ function frame(now) {
   else if (mode === 'grind') updateGrind(dt);
   else if (mode === 'rinse') updateRinse(dt, now);
   else if (mode === 'brew') updateBrew(dt, now);
+  if (LITE && (Q.frame & 1) === 0) renderer.shadowMap.needsUpdate = true;
   renderer.render(scene, camera);
 }
 
 function init() {
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Q.ratio);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.localClippingEnabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = !LITE;
   renderer.domElement.className = 'gl';
 
   scene = new THREE.Scene();
@@ -1739,7 +1773,7 @@ function init() {
   const sun = new THREE.DirectionalLight(0xfff0dd, 2.8);
   sun.position.set(-3.5, 7, 4.5);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(LITE ? 1024 : 2048, LITE ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 20 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
@@ -1805,6 +1839,11 @@ const api = {
     if (m === 'rinse') buildRinse(game);
     if (m === 'brew') buildBrew(game);
     host.appendChild(renderer.domElement);
+    Q.warm = 30;
+    Q.n = 0;
+    Q.sum = 0;
+    rectCache.r = null;
+    renderer.shadowMap.needsUpdate = true;
     if (m === 'shelf') viewsEl.remove();
     else host.appendChild(viewsEl);
     resize();
@@ -1846,7 +1885,9 @@ const api = {
 
   // 把手指在螢幕上的位置投影到粉床平面，換算成遊戲邏輯座標
   brewPoint(clientX, clientY) {
-    const r = renderer.domElement.getBoundingClientRect();
+    const t = performance.now();
+    if (!rectCache.r || t - rectCache.t > 300) rectCache = { r: renderer.domElement.getBoundingClientRect(), t };
+    const r = rectCache.r;
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     camera.updateMatrixWorld();
     raycaster.setFromCamera(ndc, camera);

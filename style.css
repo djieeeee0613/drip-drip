@@ -84,12 +84,29 @@ html, body {
   color: #fff;
   border: 3px solid var(--ink);
   border-radius: 16px;
-  font-size: 19px;
+  font-size: 17px;
   font-weight: bold;
-  white-space: nowrap;
+  line-height: 1.3;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 176px));
   box-shadow: 0 4px 0 var(--ink);
 }
-.boss.rage .boss-say { display: block; animation: sayPop 1.5s; }
+.boss.rage .boss-say { display: block; animation: sayPop 2.4s; }
+/* 做得好時：店長開心地跳一下，白色泡泡貼在旁邊 */
+.boss.cheer .boss-cat { animation: bossCheer .8s; }
+@keyframes bossCheer {
+  30% { transform: translateY(-8px) scale(1.12) rotate(-6deg); }
+  60% { transform: translateY(0) scale(1.05) rotate(4deg); }
+}
+.boss.cheer .boss-say {
+  display: block;
+  left: 70px;
+  top: 8px;
+  max-width: min(260px, calc(100vw - 96px));
+  background: var(--paper);
+  color: var(--ink);
+  animation: sayPop 2.4s;
+}
 @keyframes sayPop {
   0% { transform: scale(0) rotate(-12deg); }
   12%, 85% { transform: scale(1) rotate(-4deg); }
@@ -342,8 +359,8 @@ html, body {
 }
 
 /* 濕濾紙 */
-.rinse { width: 78%; max-width: 320px; touch-action: none; }
-.rinse svg { width: 100%; display: block; }
+.rinse { position: relative; width: 78%; max-width: 320px; touch-action: none; }
+.rinse > svg { width: 100%; display: block; }
 .rinse-cup { fill: #f3c9a0; stroke: var(--ink); stroke-width: 4; }
 .rinse-paper { fill: var(--paper); stroke: var(--ink); stroke-width: 3; }
 .rinse-wet {
@@ -453,6 +470,14 @@ html, body {
 @keyframes floatBean {
   0%, 100% { transform: translateY(0) rotate(var(--r, 20deg)) scale(var(--s, 1)); }
   50% { transform: translateY(-28px) rotate(calc(var(--r, 20deg) + 40deg)) scale(var(--s, 1)); }
+}
+
+/* 效能：玩的時候背景豆子停下來；觸控裝置不做模糊和大陰影（手機重繪很貴） */
+.bg3d i { will-change: transform; }
+#app.calm .bg3d i { animation-play-state: paused; }
+@media (pointer: coarse) {
+  .bg3d { transition: none; }
+  .bg3d i { filter: none !important; box-shadow: none; }
 }
 
 /* 畫面切換：像翻頁一樣轉進來 */
@@ -707,7 +732,7 @@ html, body {
   flex: none;
   filter: none;
 }
-#app.has3d .rinse svg { display: none; }
+#app.has3d .rinse > svg { display: none; }
 
 /* ==========================================================
    店長品鑑：觀色、聞香、啜吸、細品、評分
@@ -1044,3 +1069,44 @@ html, body {
 @keyframes fxUp { from { transform: translate(0, 0) scale(.4); opacity: 1; } to { transform: translate(var(--dx), -200px) scale(1.2); opacity: 0; } }
 @keyframes fxFall { to { transform: translateY(110vh) rotate(var(--r)); } }
 @keyframes fxSpray { from { transform: translate(0, 0) scale(1.2); } to { transform: translate(var(--dx), var(--dy)) scale(.4); opacity: 0; } }
+
+/* ==========================================================
+   畫圈提示（磨豆、濕濾紙）：一隻手指沿著虛線圓圈繞
+   ========================================================== */
+
+.spin-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  height: 84%;
+  max-width: 96%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s;
+}
+.spin-guide.on { opacity: 1; }
+.spin-guide svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.spin-ring { fill: none; stroke: var(--caramel-dark); stroke-width: 1.4; stroke-dasharray: 4 5; stroke-linecap: round; opacity: .8; }
+.spin-arrow { fill: var(--caramel-dark); }
+.spin-orbit { position: absolute; inset: 0; }
+.spin-hand { position: absolute; left: 50%; top: 4%; width: 46px; height: 46px; margin: -5px 0 0 -23px; }
+.spin-hand img { display: block; width: 100%; height: 100%; }
+.spin-guide.on .spin-orbit { animation: spinOrbit 2.2s linear infinite; }
+.spin-guide.on .spin-hand { animation: spinOrbit 2.2s linear infinite reverse; }
+@keyframes spinOrbit { to { transform: rotate(360deg); } }
+.spin-label {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  background: var(--paper);
+  font-size: 13px;
+  font-weight: bold;
+  white-space: nowrap;
+}

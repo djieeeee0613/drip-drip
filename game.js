@@ -65,15 +65,18 @@ const setHtml = (el, html) => {
   el.dataset.h = html;
   el.innerHTML = html;
 };
+const setText = (el, text) => { const t = String(text); if (el.textContent !== t) el.textContent = t; };
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const pick = (x) => (Array.isArray(x) ? x[Math.floor(Math.random() * x.length)] : x);
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === id));
+  $('app').classList.toggle('calm', !['s-title', 's-result'].includes(id));
   // 店長只在動手的步驟出來監督
   const watching = ['s-weigh', 's-grind', 's-rinse', 's-brew'].includes(id);
   $('boss').hidden = !watching;
-  if (watching && !$('boss').classList.contains('rage')) $('boss-cat').innerHTML = catSvg('watch');
+  if (watching && !$('boss').classList.contains('rage') && !$('boss').classList.contains('cheer')) $('boss-cat').innerHTML = catSvg('watch');
   // 秤豆、磨豆、濕濾紙、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
   if (window.Scene3D) {
     const hosts = { 's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-rinse': ['rinse', 'rinse'], 's-brew': ['brew-wrap', 'brew'] };
@@ -92,9 +95,40 @@ function show(id) {
   }
 }
 
-/* ---------- 監督店長：犯錯就生氣來干擾 ---------- */
+/* ---------- 店長台詞：夾雜台灣網路迷因，同一個情況每次隨機挑一句 ---------- */
 
-const boss = { until: 0, count: 0, timer: null };
+const LINES = {
+  title: [
+    '哼，我是店長拿鐵。<br>我會盯著你，沖錯我就生氣喵！',
+    '來都來了，<br>就沖一杯給本店長喝喝看。',
+    '我是店長拿鐵，很派的那種。<br>沖錯一步，我就森77！',
+    '先說好喔，<br>我不要你覺得，我要我覺得。',
+    '從從容容、游刃有餘，<br>沖壞了我可是會傻眼貓咪。',
+    '質疑、理解、成為咖啡師，<br>今天就從第一杯開始喵。',
+    '今天也要大展鴻圖喵！<br>沖錯的話……你就知道了。',
+    '尊嘟假嘟？你要挑戰本店長？<br>好啊，沖來看看。',
+  ],
+  rage: {
+    weighOver: ['倒太多了喵！', '你是在歐印喔？太多了！', '是在哈囉？豆子爆量了！', '母湯母湯，倒太多了！', '傻眼貓咪，都滿出來了！'],
+    weighLow: ['這麼少怎麼沖！', '這點豆子是在哈囉？', '這樣就夠？信你我是秦始皇', '豆子這麼少，芭比Q了'],
+    skipRinse: ['竟敢跳過？！', '回答我！為什麼跳過！', '來都來了，濾紙不濕一下？', '傻眼貓咪，濾紙還是乾的！'],
+    early: ['還沒到時間！', '我不要你覺得，我要我覺得！', '急什麼？從從容容啦！', '母湯！時間還沒到！'],
+    edge: ['不要沖到濾紙！', '是在哈囉？沖到邊邊了！', '水都從旁邊溜走了啦！', '瞄準中間好嗎，我的老天鵝'],
+    overWater: ['太多了，快放手！', '你是在歐印喔？快放手！', '芭比Q了，水太多了！', '放手啊！你暈船了喔？'],
+    still: ['手要繞圈啦！', '建議手臂加強', '定格是在拍照喔？繞圈！', '一直沖同一點，是在哈囉？'],
+    late: ['快點注水！', '回答我！Look in my eyes！', '人呢？時間到了啦！', '還在滑脆喔？快注水！'],
+  },
+  cheer: {
+    weigh: ['很有觸，克數超準！', '水喔～分毫不差！', '尊嘟假嘟？這麼準！', '從從容容，游刃有餘～'],
+    grind: ['刻度剛剛好，很可以喔！', '刻度選得好，水喔～', '這香氣把我硬控了三秒…', '很有觸，就是這個粗細！'],
+    rinse: ['有濕濾紙，算你識相', '來都來了，就是要做好！', '很有觸，紙味掰掰～'],
+    pour: ['剛剛好，水喔！', '很有觸！就是這樣！', '這一段漂亮，露比醬～嗨！', '從從容容、游刃有餘～', '大展鴻圖！繼續保持'],
+  },
+};
+
+/* ---------- 監督店長：犯錯就生氣來干擾，做得好也會誇一句 ---------- */
+
+const boss = { until: 0, count: 0, timer: null, cheerUntil: 0 };
 
 // 回傳 true 代表這次真的發飆了（有冷卻時間，不會連續發飆）
 function bossRage(msg) {
@@ -103,8 +137,9 @@ function bossRage(msg) {
   boss.until = now + 3500;
   boss.count++;
   if (window.Scene3D) Scene3D.shake();
+  $('boss').classList.remove('cheer');
   $('boss-cat').innerHTML = catSvg('angry');
-  $('boss-say').textContent = msg;
+  $('boss-say').textContent = pick(msg);
   // 重新觸發動畫：拍桌震動 + 貓掌橫掃
   ['boss', 'app', 'paw'].forEach((id) => {
     const el = $(id);
@@ -118,8 +153,26 @@ function bossRage(msg) {
   boss.timer = setTimeout(() => {
     ['boss', 'app', 'paw'].forEach((id) => $(id).classList.remove('rage'));
     $('boss-cat').innerHTML = catSvg('watch');
-  }, 1500);
+  }, 2400);
   return true;
+}
+
+// 做得好的時候誇一句（正在生氣、或剛誇過就不說）
+function bossCheer(msg) {
+  const now = performance.now();
+  if (now < boss.until || now < boss.cheerUntil || $('boss').hidden) return;
+  boss.cheerUntil = now + 4000;
+  const b = $('boss');
+  $('boss-cat').innerHTML = catSvg('happy');
+  $('boss-say').textContent = pick(msg);
+  b.classList.remove('cheer');
+  void b.offsetWidth;
+  b.classList.add('cheer');
+  clearTimeout(boss.timer);
+  boss.timer = setTimeout(() => {
+    b.classList.remove('cheer');
+    $('boss-cat').innerHTML = catSvg('watch');
+  }, 2400);
 }
 
 let audioCtx = null;
@@ -217,12 +270,11 @@ function sfx(name) {
 // 追蹤手指繞著元素中心轉了多少角度
 function trackSpin(el, onDelta, onEnd) {
   let last = null;
-  const angle = (e) => {
-    const r = el.getBoundingClientRect();
-    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
-  };
+  let r = null; // 開始畫圈時量一次元件位置，移動中不再量（每次量都會讓瀏覽器重排版面）
+  const angle = (e) => Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
   el.addEventListener('pointerdown', (e) => {
     el.setPointerCapture(e.pointerId);
+    r = el.getBoundingClientRect();
     last = angle(e);
   });
   el.addEventListener('pointermove', (e) => {
@@ -456,6 +508,7 @@ function showTitle() {
   const three = keys.filter((k) => dex[k] >= 3).length;
   $('dex').innerHTML = `圖鑑 ${keys.length} / 27　${icon('star').repeat(3)} ${three} 杯`;
   $('title-cat').innerHTML = catSvg('watch');
+  $('title-say').innerHTML = pick(LINES.title);
   show('s-title');
 }
 $('btn-start').addEventListener('click', () => { beep(); playBgm(); boss.count = 0; startPick(0); });
@@ -534,19 +587,20 @@ function startWeigh() {
   weigh.warned = false;
   $('bowl').innerHTML = '';
   $('weigh-val').textContent = '0.0';
-  $('weigh-hint').innerHTML = `這個沖法需要 <b>${game.method.dose} g</b> 豆子，越準越好`;
+  $('weigh-hint').innerHTML = `這個沖法需要 <b>${game.method.dose} g</b> 豆子，越準越好（快到時會自動倒慢一點）`;
   show('s-weigh');
 }
 function weighLoop(t) {
   if (!weigh.pouring) return;
   const dt = Math.min(0.05, (t - weigh.last) / 1000);
   weigh.last = t;
-  weigh.g += dt * (4 + Math.random() * 3);
+  const near = Math.abs(weigh.g - game.method.dose) < 1.5;
+  weigh.g += dt * (near ? 1.6 + Math.random() : 4 + Math.random() * 3);
   $('weigh-val').textContent = weigh.g.toFixed(1);
   if (window.Scene3D) Scene3D.setWeigh(weigh.g, true);
   if (!weigh.warned && weigh.g > game.method.dose + 1) {
     weigh.warned = true;
-    bossRage('倒太多了喵！');
+    bossRage(LINES.rage.weighOver);
   }
   while (weigh.beans < weigh.g / 0.5 && weigh.beans < 60) {
     const b = document.createElement('i');
@@ -577,30 +631,42 @@ function weighLoop(t) {
   $('btn-weigh-reset').addEventListener('click', startWeigh);
   $('btn-weigh-done').addEventListener('click', () => {
     if (weigh.g < 1) return;
-    if (weigh.g < game.method.dose - 1.5) bossRage('這麼少怎麼沖！');
+    if (weigh.g < game.method.dose - 1.5) bossRage(LINES.rage.weighLow);
     result.dose = weigh.g;
     beep();
     startGrind();
+    if (Math.abs(weigh.g - game.method.dose) <= 0.5) bossCheer(LINES.cheer.weigh);
   });
 })();
 
+/* ---------- 畫圈提示（磨豆、濕濾紙） ---------- */
+
+const guideTimers = {};
+function spinGuide(id, on, delay = 0) {
+  clearTimeout(guideTimers[id]);
+  const set = () => $(id).classList.toggle('on', on);
+  if (delay) guideTimers[id] = setTimeout(set, delay);
+  else set();
+}
+
 /* ---------- 研磨 ---------- */
 
-const grind = { total: 0, angle: 0, speeds: [], winAngle: 0, winStart: 0, done: false };
+const grind = { total: 0, done: false };
 const grindName = (v) => (v <= 3 ? '細' : v <= 5 ? '中細' : v <= 7 ? '中' : '粗');
 const idealGrind = () => clamp(game.bean.grind + game.dripper.grindAdj + game.method.grindAdj, 1, 10);
 
 function startGrind() {
-  Object.assign(grind, { total: 0, angle: 0, speeds: [], winAngle: 0, winStart: 0, done: false, jamUntil: 0 });
+  Object.assign(grind, { total: 0, done: false });
   $('grind-size').value = 5;
   $('grind-size').disabled = false;
   updateGrindLabel();
   $('grinder-fill').style.height = '0';
   $('crank').style.transform = 'rotate(0rad)';
   $('btn-grind-done').disabled = true;
-  $('grind-status').textContent = '用手指繞著磨豆機畫圈，速度越穩越均勻';
+  $('grind-status').textContent = '手指在磨豆機上畫圈，磨滿就好';
   $('grind-hint').innerHTML = `店長提示：這個組合適合<b>「${grindName(idealGrind())}」</b>研磨。先調刻度再開始磨`;
   show('s-grind');
+  spinGuide('grind-guide', true);
 }
 function updateGrindLabel() {
   const v = +$('grind-size').value;
@@ -612,27 +678,9 @@ $('grind-size').addEventListener('input', updateGrindLabel);
 
 trackSpin($('grinder'), (d, a) => {
   if (grind.done) return;
-  const now = performance.now();
-  if (now < grind.jamUntil) return; // 店長拍桌，磨豆機卡住
+  spinGuide('grind-guide', false);
   $('grind-size').disabled = true; // 開磨後不能再改刻度
   grind.total += Math.abs(d);
-  grind.winAngle += Math.abs(d);
-  if (!grind.winStart) grind.winStart = now;
-  if (now - grind.winStart >= 200) {
-    const v = grind.winAngle / ((now - grind.winStart) / 1000);
-    const s = grind.speeds;
-    if (s.length >= 4) {
-      const mean = s.reduce((x, y) => x + y, 0) / s.length;
-      // 忽快忽慢 → 店長生氣，磨豆機卡住一下
-      if ((v < mean * 0.45 || v > mean * 2.2) && bossRage('轉穩一點！')) {
-        grind.jamUntil = now + 900;
-        $('grind-status').textContent = '店長拍桌，磨豆機卡住了！';
-      }
-    }
-    s.push(v);
-    grind.winAngle = 0;
-    grind.winStart = now;
-  }
   const p = clamp(grind.total / (GRIND_TURNS * 2 * Math.PI));
   $('crank').style.transform = `rotate(${a}rad)`;
   if (window.Scene3D) Scene3D.setGrind({ angle: a, p });
@@ -641,25 +689,18 @@ trackSpin($('grinder'), (d, a) => {
   if (p >= 1) {
     grind.done = true;
     $('btn-grind-done').disabled = false;
-    $('grind-status').textContent = '磨好了！聞起來好香～';
+    setText($('grind-status'), '磨好了！聞起來好香～');
     beep(880, 0.15);
   } else {
-    $('grind-status').textContent = `研磨中… ${Math.round(p * 100)}%`;
+    setText($('grind-status'), `研磨中… ${Math.round(p * 100)}%`);
   }
-}, () => { grind.winStart = 0; grind.winAngle = 0; });
+}, () => { if (!grind.done) spinGuide('grind-guide', true, 700); });
 
 $('btn-grind-done').addEventListener('click', () => {
-  const s = grind.speeds;
-  let cv = 1;
-  if (s.length > 2) {
-    const mean = s.reduce((a, b) => a + b, 0) / s.length;
-    const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
-    cv = sd / mean;
-  }
-  result.uniform = clamp(1 - (cv - 0.2) / 0.6);
   result.grind = +$('grind-size').value;
   beep();
   startRinse();
+  if (result.grind === idealGrind()) bossCheer(LINES.cheer.grind);
 });
 
 /* ---------- 濕濾紙 ---------- */
@@ -670,8 +711,10 @@ function startRinse() {
   $('rinse-wet').style.strokeDashoffset = 440;
   $('btn-rinse-done').disabled = true;
   show('s-rinse');
+  spinGuide('rinse-guide', true);
 }
 trackSpin($('rinse'), (d, a) => {
+  spinGuide('rinse-guide', false);
   rinse.total += Math.abs(d);
   const p = clamp(rinse.total / (2 * Math.PI));
   $('rinse-wet').style.strokeDashoffset = 440 * (1 - p);
@@ -680,9 +723,12 @@ trackSpin($('rinse'), (d, a) => {
     $('btn-rinse-done').disabled = false;
     beep(880, 0.15);
   }
-}, () => { if (window.Scene3D) Scene3D.setRinse({ pouring: false }); });
-$('btn-rinse-skip').addEventListener('click', () => { result.rinsed = false; startBrew(); bossRage('竟敢跳過？！'); });
-$('btn-rinse-done').addEventListener('click', () => { result.rinsed = true; beep(); startBrew(); });
+}, () => {
+  if (window.Scene3D) Scene3D.setRinse({ pouring: false });
+  if (rinse.total < 2 * Math.PI) spinGuide('rinse-guide', true, 700);
+});
+$('btn-rinse-skip').addEventListener('click', () => { result.rinsed = false; startBrew(); bossRage(LINES.rage.skipRinse); });
+$('btn-rinse-done').addEventListener('click', () => { result.rinsed = true; beep(); startBrew(); bossCheer(LINES.cheer.rinse); });
 
 /* ---------- 沖煮 ---------- */
 
@@ -736,6 +782,7 @@ function brewRelease() {
   while (brew.stage < stages.length && brew.water >= stages[brew.stage].cum - 6) {
     if (!brew.stageStarted) brew.timeErr.push(0); // 上一段沖過頭，直接吃掉這一段
     brew.waterErr.push(brew.water - stages[brew.stage].cum);
+    if (Math.abs(brew.water - stages[brew.stage].cum) <= 4) bossCheer(LINES.cheer.pour);
     brew.stage++;
     brew.stageStarted = false;
     brew.overWarned = false;
@@ -778,12 +825,12 @@ function brewLoop(t) {
     if (!brew.stageStarted) {
       brew.stageStarted = true;
       brew.timeErr.push(brew.stage === 0 ? 0 : brew.clock - st.at);
-      if (brew.stage > 0 && brew.clock < st.at - 8) rage('還沒到時間！');
+      if (brew.stage > 0 && brew.clock < st.at - 8) rage(LINES.rage.early);
     }
     // 沖到濾紙邊緣（被店長撞到的那段不算）
     brew.edgeRun = brew.onEdge && t >= brew.joltUntil ? brew.edgeRun + dt : 0;
-    if (brew.edgeRun > 0.4) { brew.edgeRun = 0; rage('不要沖到濾紙！'); }
-    if (!brew.overWarned && brew.water > st.cum + 10) { brew.overWarned = true; rage('太多了，快放手！'); }
+    if (brew.edgeRun > 0.4) { brew.edgeRun = 0; rage(LINES.rage.edge); }
+    if (!brew.overWarned && brew.water > st.cum + 10) { brew.overWarned = true; rage(LINES.rage.overWater); }
     brew.water += FLOW * dt;
     brew.pool = clamp(brew.pool + dt * 0.8);
     brew.pourTime += dt;
@@ -794,7 +841,7 @@ function brewLoop(t) {
     if (brew.moveT >= 0.25) {
       if (brew.moveAcc / brew.moveT < 60) {
         brew.stillTime += brew.moveT;
-        if (++brew.stillRun >= 3) { brew.stillRun = 0; rage('手要繞圈啦！'); }
+        if (++brew.stillRun >= 3) { brew.stillRun = 0; rage(LINES.rage.still); }
       } else {
         brew.stillRun = 0;
       }
@@ -813,34 +860,35 @@ function brewLoop(t) {
   brew.bubbles = brew.bubbles.filter((b) => b.life > 0);
 
   // 介面
-  $('brew-time').textContent = fmtTime(brew.clock);
-  $('brew-water').textContent = Math.round(brew.water);
+  setText($('brew-time'), fmtTime(brew.clock));
+  setText($('brew-water'), Math.round(brew.water));
   const when = $('brew-when');
-  when.className = 'when';
+  let whenCls = 'when';
   if (brew.phase === 'pour') {
     const prev = brew.stage === 0 ? 0 : stages[brew.stage - 1].cum;
     const frac = (brew.water - prev) / (st.cum - prev);
-    $('brew-stage').textContent = `${st.label}：注水到 ${st.cum} g`;
-    $('brew-bar').style.width = `${clamp(frac * 80, 0, 100)}%`;
+    setText($('brew-stage'), `${st.label}：注水到 ${st.cum} g`);
+    const bw = `${clamp(frac * 80, 0, 100).toFixed(1)}%`;
+    if ($('brew-bar').style.width !== bw) $('brew-bar').style.width = bw;
     $('brew-bar').classList.toggle('over', brew.water > st.cum + 6);
     if (brew.pouring || brew.stageStarted) {
       setHtml(when, brew.water >= st.cum - 6 ? '夠了，放開手指！' : `注水中…到 ${st.cum} g 放開`);
-      if (brew.water >= st.cum - 6) when.classList.add('go');
+      if (brew.water >= st.cum - 6) whenCls = 'when go';
     } else if (brew.stage === 0) {
       setHtml(when, '按住粉床開始注水');
     } else if (brew.clock < st.at - 5) {
       setHtml(when, `${icon('hourglass')} 等到 ${fmtTime(st.at)} 再注水`);
     } else if (brew.clock <= st.at + 6) {
       setHtml(when, '就是現在，注水！');
-      when.classList.add('go');
+      whenCls = 'when go';
     } else {
       setHtml(when, '太晚了，快注水！');
-      when.classList.add('late');
-      if (!brew.lateWarned && brew.clock > st.at + 12) { brew.lateWarned = true; bossRage('快點注水！'); }
+      whenCls = 'when late';
+      if (!brew.lateWarned && brew.clock > st.at + 12) { brew.lateWarned = true; bossRage(LINES.rage.late); }
     }
   } else {
     brew.drain += dt;
-    $('brew-stage').textContent = '等咖啡滴完…';
+    setText($('brew-stage'), '等咖啡滴完…');
     $('brew-bar').style.width = '80%';
     setHtml(when, '');
     if (brew.drain > 2.4) {
@@ -849,6 +897,8 @@ function brewLoop(t) {
       return;
     }
   }
+
+  if (when.className !== whenCls) when.className = whenCls;
 
   if (window.Scene3D && Scene3D.active) {
     Scene3D.setBrew({
@@ -1071,25 +1121,25 @@ function drawBrew(stages) {
 
 function finish() {
   const { bean, dripper, method } = game;
-  const m = bean.diff * dripper.diff; // 難度：誤差會被放大
+  const m = 1 + (bean.diff * dripper.diff - 1) * 0.7; // 難度：誤差會被放大（放大幅度打七折）
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
   // 各項分數
   const doseErr = result.dose - method.dose;
-  const sDose = 10 * clamp(1 - (Math.abs(doseErr) * m - 0.3) / 2.7);
+  const sDose = 10 * clamp(1 - (Math.abs(doseErr) * m - 0.5) / 3.5);
 
   const gDiff = idealGrind() - result.grind; // 正數 = 磨得比理想細
-  const sGrindSet = [15, 12, 7, 3][Math.abs(gDiff)] || 0;
-  const sGrind = sGrindSet + 10 * result.uniform;
+  const sGrindSet = [15, 13, 8, 4][Math.abs(gDiff)] || 0;
+  const sGrind = sGrindSet + 10; // 磨完就拿到這 10 分，不再看轉得穩不穩
 
   const sRinse = result.rinsed ? 5 : 0;
 
-  const sWater = 25 * avg(brew.waterErr.map((e) => clamp(1 - (Math.abs(e) * m - 3) / 22)));
+  const sWater = 25 * avg(brew.waterErr.map((e) => clamp(1 - (Math.abs(e) * m - 4) / 24)));
   const tErr = brew.timeErr.slice(1);
-  const sTime = 20 * (tErr.length ? avg(tErr.map((e) => clamp(1 - (Math.abs(e) * m - 5) / 25))) : 1);
+  const sTime = 20 * (tErr.length ? avg(tErr.map((e) => clamp(1 - (Math.abs(e) * m - 6) / 28))) : 1);
 
   const bad = (brew.edgeTime + brew.stillTime * 0.7) / Math.max(1, brew.pourTime);
-  const tech = clamp(1 - bad * m);
+  const tech = clamp(1 - bad * m * 0.85);
   const sTech = 15 * tech;
 
   const score = Math.round(sDose + sGrind + sRinse + sWater + sTime + sTech);
@@ -1097,7 +1147,7 @@ function finish() {
 
   // 萃取度：正 = 過萃（苦），負 = 萃取不足（酸）
   const finalWaterErr = brew.waterErr[brew.waterErr.length - 1] || 0;
-  const E = clamp(gDiff * 0.35 + avg(tErr) / 30 + finalWaterErr / 40, -1.5, 1.5);
+  const E = clamp(gDiff * 0.3 + avg(tErr) / 34 + finalWaterErr / 46, -1.5, 1.5);
 
   const p = bean.profile;
   const c10 = (v) => clamp(v, 0, 10);
@@ -1106,25 +1156,42 @@ function finish() {
     甜: c10(p.甜 - Math.abs(E) * 3 - (1 - tech) * 2),
     苦: c10(p.苦 + (E > 0 ? E * 3.5 : E)),
     醇厚: c10(p.醇厚 + doseErr * 0.5 - finalWaterErr / 30),
-    香氣: c10(p.香氣 - (1 - result.uniform) * 3 - (result.rinsed ? 0 : 1) - Math.abs(E)),
+    香氣: c10(p.香氣 - (result.rinsed ? 0 : 1) - Math.abs(E)),
   };
 
   // 找出最大的問題來給評語
   const flaws = [
-    [Math.abs(gDiff) >= 2 && gDiff > 0, 15 - sGrindSet, '磨太細了，苦到我炸毛！下次刻度調粗一點。', 'bitter'],
-    [Math.abs(gDiff) >= 2 && gDiff < 0, 15 - sGrindSet, '磨太粗了，喝起來像酸酸的水……刻度調細一點喵。', 'sour'],
-    [true, (1 - result.uniform) * 10, '粉磨得粗細不均，轉把手的速度要穩一點。', 'tech'],
-    [true, 10 - sDose, doseErr > 0 ? '豆子放太多，味道太濃了喵。' : '豆子放太少，喝起來好淡。', doseErr > 0 ? 'strong' : 'weak'],
-    [true, 25 - sWater, finalWaterErr > 0 ? '水加太多，味道被沖淡了。注水到目標就要放手！' : '每一段的水量沒抓準，看著電子秤再放手喵。', finalWaterErr > 0 ? 'weak' : 'strong'],
-    [true, 20 - sTime, avg(tErr) > 0 ? '注水太慢，泡太久有點苦澀。跟著時間走喵。' : '太心急了！還沒等夠就注水，味道出不來。', avg(tErr) > 0 ? 'bitter' : 'sour'],
-    [true, 15 - sTech, brew.edgeTime > brew.stillTime * 0.7 ? '水沖到濾紙邊緣了，會從旁邊流走。在中間繞圈就好。' : '手要一直繞圈，不要對著同一個點沖喵。', 'tech'],
-    [!result.rinsed, 5, '有一點紙味……下次記得先濕濾紙。', 'paper'],
+    [Math.abs(gDiff) >= 2 && gDiff > 0, 15 - sGrindSet, pick(['磨太細了，苦到我炸毛！下次刻度調粗一點。', '磨太細，苦到我破防了！刻度調粗一點啦。']), 'bitter'],
+    [Math.abs(gDiff) >= 2 && gDiff < 0, 15 - sGrindSet, pick(['磨太粗了，喝起來像酸酸的水……刻度調細一點喵。', '磨太粗，酸到我藍瘦香菇……刻度調細一點。']), 'sour'],
+    [true, 10 - sDose, doseErr > 0
+      ? pick(['豆子放太多，味道太濃了喵。', '豆子歐印下去，濃到我森77，下次少放一點。'])
+      : pick(['豆子放太少，喝起來好淡。', '豆子太少，淡到我傻眼貓咪。']), doseErr > 0 ? 'strong' : 'weak'],
+    [true, 25 - sWater, finalWaterErr > 0
+      ? pick(['水加太多，味道被沖淡了。注水到目標就要放手！', '水加太多是在哈囉？到目標就要放手！'])
+      : pick(['每一段的水量沒抓準，看著電子秤再放手喵。', '水量沒抓準，母湯喔，看著電子秤再放手。']), finalWaterErr > 0 ? 'weak' : 'strong'],
+    [true, 20 - sTime, avg(tErr) > 0
+      ? pick(['注水太慢，泡太久有點苦澀。跟著時間走喵。', '從從容容不是叫你慢吞吞！注水太慢，有點苦澀。'])
+      : pick(['太心急了！還沒等夠就注水，味道出不來。', '我不要你覺得時間到，我要我覺得！太急了啦。']), avg(tErr) > 0 ? 'bitter' : 'sour'],
+    [true, 15 - sTech, brew.edgeTime > brew.stillTime * 0.7
+      ? pick(['水沖到濾紙邊緣了，會從旁邊流走。在中間繞圈就好。', '一直沖到濾紙邊邊是在哈囉？在中間繞圈就好。'])
+      : pick(['手要一直繞圈，不要對著同一個點沖喵。', '手都不繞圈，建議手臂加強喵。']), 'tech'],
+    [!result.rinsed, 5, pick(['有一點紙味……下次記得先濕濾紙。', '有紙味。來都來了，濕個濾紙很難嗎？']), 'paper'],
   ].filter((f) => f[0]).sort((a, b) => b[1] - a[1]);
 
+  const note = bean.desc.split('、')[0];
   let comment;
-  if (stars === 3) comment = `喵嗚～完美！這杯${bean.name}的${bean.desc.split('、')[0]}完全出來了！`;
-  else if (stars === 2) comment = `不錯喝喵！不過${flaws[0][2]}`;
-  else comment = flaws[0][2];
+  if (score === 87) comment = `87 分，不能再高了！這杯${note}很有誠意喵～`;
+  else if (stars === 3) {
+    comment = pick([
+      `喵嗚～完美！這杯${bean.name}的${note}完全出來了！`,
+      `大展鴻圖！這杯${note}完全出來了，可以開店了喵！`,
+      `尊嘟假嘟？${note}這麼明顯，你偷練過吧！`,
+      `質疑、理解、成為你的粉絲……這杯${note}太讚了！`,
+      `很有觸！${bean.name}的${note}被你沖出來了喵！`,
+    ]);
+  } else if (stars === 2) comment = `${pick(['不錯喝喵！不過', '很可以喔！不過', '水喔～但是'])}${flaws[0][2]}`;
+  else if (stars === 1) comment = flaws[0][2];
+  else comment = `${pick(['芭比Q了……', '傻眼貓咪……', '累了，毀滅吧……'])}${flaws[0][2]}`;
 
   lastResult = { score, stars, comment, bean, dripper, method, anger: boss.count };
 
@@ -1187,11 +1254,11 @@ const mixColor = (a, b, k) => {
 
 // 五個風味項目：偏高 / 偏低時的標籤，以及店長會不會因此皺眉（mood 為 null 就只標示不反應）
 const TASTE_ROWS = [
-  { k: '酸', ok: '明亮', hi: ['太酸', 'sour', '好酸！舌頭都縮起來了', 'shake'], lo: ['不夠明亮', 'watch', '酸質不見了，喝起來好平', 'tilt'] },
-  { k: '甜', ok: '甜感飽滿', hi: ['很甜', null], lo: ['甜感不足', 'watch', '甜感出不來……', 'tilt'] },
-  { k: '苦', ok: '適中', hi: ['太苦', 'bitter', '好苦……舌頭發麻', 'shiver'], lo: ['苦味很輕', null] },
-  { k: '醇厚', ok: '圓潤', hi: ['太厚重', 'strong', '好濃！毛都炸起來了！', 'puff'], lo: ['太稀薄', 'weak', '口感好稀，這是水嗎？', 'tilt'] },
-  { k: '香氣', ok: '迷人', hi: ['很香', null], lo: ['香氣不足', 'watch', '香氣都跑掉了……', 'tilt'] },
+  { k: '酸', ok: '明亮', hi: ['太酸', 'sour', ['好酸！舌頭都縮起來了', '酸到我藍瘦香菇……', '好酸，酸得像極了愛情'], 'shake'], lo: ['不夠明亮', 'watch', ['酸質不見了，喝起來好平', '酸質呢？平到傻眼貓咪'], 'tilt'] },
+  { k: '甜', ok: '甜感飽滿', hi: ['很甜', null], lo: ['甜感不足', 'watch', ['甜感出不來……', '說好的甜感呢？母湯喔'], 'tilt'] },
+  { k: '苦', ok: '適中', hi: ['太苦', 'bitter', ['好苦……舌頭發麻', '苦到我破防了……', '苦到我嚇到吃手手'], 'shiver'], lo: ['苦味很輕', null] },
+  { k: '醇厚', ok: '圓潤', hi: ['太厚重', 'strong', ['好濃！毛都炸起來了！', '濃到我森77，毛都炸了！'], 'puff'], lo: ['太稀薄', 'weak', ['口感好稀，這是水嗎？', '稀成這樣，是在哈囉？'], 'tilt'] },
+  { k: '香氣', ok: '迷人', hi: ['很香', null], lo: ['香氣不足', 'watch', ['香氣都跑掉了……', '香氣呢？芭比Q了……'], 'tilt'] },
 ];
 
 // 把這一杯的數據整理成品鑑時要演出的內容
@@ -1202,14 +1269,14 @@ function buildTasting(t) {
   let look;
   if (Math.abs(wk) > Math.max(0.35, Math.abs(ex))) {
     look = wk > 0
-      ? { text: '顏色偏淡、很透光', say: '顏色好淡……水是不是加太多了？', good: false }
-      : { text: '濃到不透光', say: '顏色好深，會不會太濃？', good: false };
+      ? { text: '顏色偏淡、很透光', say: pick(['顏色好淡……水是不是加太多了？', '淡成這樣，是在哈囉？']), good: false }
+      : { text: '濃到不透光', say: pick(['顏色好深，會不會太濃？', '黑成這樣，我的老天鵝……']), good: false };
   } else if (ex < -0.4) {
-    look = { text: '偏淺的琥珀色', say: '顏色偏淺，可能萃取不足。', good: false };
+    look = { text: '偏淺的琥珀色', say: pick(['顏色偏淺，可能萃取不足。', '顏色淺淺的，萃取不夠喔。']), good: false };
   } else if (ex > 0.4) {
-    look = { text: '偏黑的深褐色', say: '顏色太深，可能萃取過頭了。', good: false };
+    look = { text: '偏黑的深褐色', say: pick(['顏色太深，可能萃取過頭了。', '顏色這麼深，芭比Q了，萃取過頭。']), good: false };
   } else {
-    look = { text: '透亮的紅棕色', say: '顏色很漂亮，透亮的紅棕色！', good: true };
+    look = { text: '透亮的紅棕色', say: pick(['顏色很漂亮，透亮的紅棕色！', '透亮的紅棕色，很可以喔！', '這個色澤……水喔！']), good: true };
   }
 
   // 聞香：香氣分數和杯測表上「香氣」那一列用的是同一個數字
@@ -1217,10 +1284,10 @@ function buildTasting(t) {
   const d = t.cup.香氣 - t.ideal.香氣;
   const bright = d >= -1 ? notes.length : d >= -3 ? Math.max(1, notes.length - 1) : 0;
   let smellSay;
-  if (bright === notes.length) smellSay = `聞到${notes.slice(0, 2).join('和')}了～`;
+  if (bright === notes.length) smellSay = pick([`聞到${notes.slice(0, 2).join('和')}了～`, `${notes.slice(0, 2).join('和')}的香氣，把我硬控了三秒！`]);
   else if (bright > 0) smellSay = `香氣有點弱，只聞到${notes.slice(0, bright).join('、')}。`;
-  else smellSay = '幾乎聞不到香氣……';
-  if (!t.rinsed) smellSay = '嗯？有一股紙味……';
+  else smellSay = pick(['幾乎聞不到香氣……', '香氣呢？是在哈囉？']);
+  if (!t.rinsed) smellSay = pick(['嗯？有一股紙味……', '這紙味……信你有濕濾紙，我是秦始皇']);
   const smell = { notes: notes.map((n, i) => ({ text: n, muted: i >= bright })), paper: !t.rinsed, say: smellSay };
 
   // 細品：每一項和這支豆子的理想風味比，差 1 分以內算剛好
@@ -1230,8 +1297,8 @@ function buildTasting(t) {
     const diff = v - i;
     const status = diff > 1 ? 'hi' : diff < -1 ? 'lo' : 'ok';
     const info = status === 'ok' ? [def.ok, null] : def[status];
-    let react = info[1] ? { mood: info[1], say: info[2], anim: info[3] } : null;
-    if (react && def.k === '香氣' && !t.rinsed) react = { mood: 'paper', say: '紙味把香氣都蓋掉了……', anim: 'shake' };
+    let react = info[1] ? { mood: info[1], say: pick(info[2]), anim: info[3] } : null;
+    if (react && def.k === '香氣' && !t.rinsed) react = { mood: 'paper', say: pick(['紙味把香氣都蓋掉了……', '紙味好重，回答我！有濕濾紙嗎？']), anim: 'shake' };
     return { k: def.k, v, i, diff, status, tag: info[0], react };
   });
   // 三星的杯子不挑毛病；其他就挑最明顯的一項皺眉。
@@ -1240,12 +1307,13 @@ function buildTasting(t) {
   const worst = t.stars < 3
     ? rows.filter((r) => r.react && Math.abs(r.diff) > 1.5).sort((a, b) => weight(b) - weight(a))[0] || null
     : null;
-  const summary = rows.every((r) => r.status === 'ok') ? '每一項都很平衡！' : t.stars === 3 ? '整體很協調喵。' : '有幾項沒到位喵……';
+  const summary = pick(rows.every((r) => r.status === 'ok') ? ['每一項都很平衡！', '五項都到位，很有觸！']
+    : t.stars === 3 ? ['整體很協調喵。', '整體很協調，水喔～'] : ['有幾項沒到位喵……', '有幾項沒到位，母湯喔……']);
 
   // 評分：印章、最後的反應和評鑑畫面一致
   const stamp = t.score >= 100 ? '完美' : ['重沖！', '再加油', '還不錯', '超好喝'][t.stars];
   let finale;
-  if (t.score >= 100) finale = [{ mood: 'bow', anim: 'bow', fx: 'confetti', sfx: 'fanfare', say: '完美！本店長向你脫帽致敬！', ms: 2600 }];
+  if (t.score >= 100) finale = [{ mood: 'bow', anim: 'bow', fx: 'confetti', sfx: 'fanfare', say: pick(['完美！本店長向你脫帽致敬！', '尊嘟假嘟？滿分！本店長脫帽致敬！', '質疑、理解、成為你的粉絲！滿分！']), ms: 2600 }];
   else if (t.stars === 3) finale = [{ mood: 'love', anim: 'bounce', fx: 'hearts', sfx: 'purr', say: t.comment, ms: 2600 }];
   else if (t.stars === 2) finale = [{ mood: 'ok', anim: 'nod', fx: 'sparkle', sfx: 'yay', say: t.comment, ms: 2600 }];
   else if (t.stars === 1) finale = [{ mood: 'watch', anim: 'push', sfx: 'hmm', say: t.comment, ms: 2600 }];
@@ -1555,6 +1623,7 @@ function countUp(el, target) {
 
 // 背景的豆子跟著手指稍微位移，做出景深
 document.getElementById('app').addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || e.currentTarget.classList.contains('calm')) return;
   const r = e.currentTarget.getBoundingClientRect();
   const bg = document.querySelector('.bg3d');
   bg.style.setProperty('--px', (((e.clientX - r.left) / r.width - 0.5) * -24).toFixed(1));
@@ -1726,7 +1795,7 @@ async function shareResult() {
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       try {
         await navigator.clipboard.writeText(text);
-        toast('圖片已下載，文字已複製！');
+        toast('圖片已下載，文字已複製，留友看！');
       } catch (e) {
         toast('圖片已下載！');
       }
