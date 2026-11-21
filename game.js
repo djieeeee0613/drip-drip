@@ -69,11 +69,14 @@ function show(id) {
   // 秤豆、磨豆、濕濾紙、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
   if (window.Scene3D) {
     const hosts = { 's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-rinse': ['rinse', 'rinse'], 's-brew': ['brew-wrap', 'brew'] };
-    if (id === 's-pick' && pickIdx === 0) hosts['s-pick'] = ['stage-shelf', 'shelf'];
+    // 選豆、選濾杯用 3D 展示架
+    const pk = id === 's-pick' ? PICKS[pickIdx] : null;
+    if (pk && pk.key !== 'method') hosts['s-pick'] = ['stage-shelf', 'shelf'];
     const data = Object.assign({}, game, {
       rinsed: result.rinsed,
-      beans: BEANS,
-      sel: BEANS.indexOf(game.bean),
+      kind: pk && pk.key,
+      items: pk && pk.list,
+      sel: pk ? pk.list.indexOf(game[pk.key]) : -1,
       onPick: (i) => { const c = $('pick-cards').children[i]; if (c) c.click(); },
     });
     if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], data);
@@ -486,7 +489,8 @@ function startPick(i) {
   $('pick-step').textContent = `${i + 1} / 7`;
   $('pick-title').textContent = p.title;
   $('btn-pick-next').disabled = true;
-  $('s-pick').classList.toggle('shelf', p.key === 'bean');
+  $('s-pick').classList.toggle('shelf', p.key !== 'method');
+  $('shelf-hint').textContent = p.key === 'bean' ? '點袋子挑豆子' : '點濾杯挑一個';
   const box = $('pick-cards');
   box.innerHTML = '';
   p.list.forEach((item) => {
@@ -498,7 +502,7 @@ function startPick(i) {
       el.classList.add('sel');
       game[p.key] = item;
       $('btn-pick-next').disabled = false;
-      if (p.key === 'bean' && window.Scene3D && Scene3D.active) Scene3D.setShelf(p.list.indexOf(item));
+      if (p.key !== 'method' && window.Scene3D && Scene3D.active) Scene3D.setShelf(p.list.indexOf(item));
       beep(520);
     });
     box.appendChild(el);

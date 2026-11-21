@@ -1,4 +1,4 @@
-// 選豆的豆子架，和秤豆、磨豆、濕濾紙、注水四個步驟的 3D 場景（最後的店長品鑑是 2D 動畫，不在這裡）。
+// 選豆、選濾杯的展示架，和秤豆、磨豆、濕濾紙、注水四個步驟的 3D 場景（最後的店長品鑑是 2D 動畫，不在這裡）。
 // 模型全部用程式組出來（不載入外部模型檔），材質用物理光照、環境反射和即時陰影。
 // 載入失敗（沒網路、瀏覽器不支援 import map 或 WebGL）時 window.Scene3D 不存在，遊戲自動改用 2D 畫面。
 import * as THREE from 'three';
@@ -211,9 +211,6 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 // 每個場景的三個鏡頭：[鏡頭 x, y, z, 看向 x, y, z]
 const VIEWS = {
-  shelf: {
-    angle: [0, 1.25, 4.75, 0, 0.6, 0],
-  },
   weigh: {
     angle: [0.5, 3.0, 4.6, 0.5, 0.9, 0],
     top: [0.35, 6.6, 0.01, 0.35, 0.5, 0],
@@ -475,10 +472,15 @@ function buildPouch(bean, { open = false } = {}) {
 }
 
 /* ==========================================================
-   場景零：豆子架（選豆）
+   場景零：展示架（選豆、選濾杯）
    ========================================================== */
 
-const SH = { built: false, bags: [], sel: -1, onPick: null, t: 0, hop: [] };
+const SH = { sets: {}, set: null, kind: 'bean', items: [], sel: -1, onPick: null, t: 0, hop: [] };
+// 展示架的鏡頭：豆袋平視；濾杯從高一點往下看，才看得到杯裡的螺旋肋和出水孔
+const SHELF_CAM = {
+  bean: [0, 1.25, 4.75, 0, 0.6, 0],
+  dripper: [0, 2.8, 4.3, 0, 0.58, 0],
+};
 const SHELF_X = [-1.22, 0, 1.22];
 const SHELF_Z = -0.38;
 
@@ -495,7 +497,7 @@ const plasterTex = canvasTex(256, 256, (x, w, h) => {
 }, { repeat: [4, 3] });
 
 // 層板前緣的小價卡
-function shelfTag(bean) {
+function shelfTag(title, sub) {
   const t = canvasTex(256, 96, (x, w, h) => {
     x.fillStyle = '#fffaf0';
     x.fillRect(0, 0, w, h);
@@ -505,9 +507,9 @@ function shelfTag(bean) {
     x.fillStyle = '#4a2f1d';
     x.textAlign = 'center';
     x.font = 'bold 34px "Huninn", sans-serif';
-    x.fillText(bean.name.split(' ').pop(), w / 2, 44);
+    x.fillText(title, w / 2, 44);
     x.font = '24px "Huninn", sans-serif';
-    x.fillText(`${bean.roast}・${bean.level}`, w / 2, 78);
+    x.fillText(sub, w / 2, 78);
   });
   return mesh(new THREE.PlaneGeometry(0.62, 0.23), std(0xffffff, 0.8, 0, { map: t }));
 }
@@ -526,39 +528,64 @@ function buildShelf() {
     g.add(brace);
     [-0.3, -0.9].forEach((y) => g.add(mesh(cyl(0.025, 0.025, 0.02, 12), steel(0.3), x, y, -0.96).rotateX(Math.PI / 2)));
   });
-  // 袋子之間撒了幾顆豆子
+  // 架上撒了幾顆豆子
   const beanMat = phys({ color: 0x3a1d0b, roughness: 0.45, clearcoat: 0.25 });
   [[-0.61, 0.22], [-0.55, 0.3], [-0.68, 0.34], [0.6, 0.26], [0.66, 0.36], [0.56, 0.4], [0.62, 0.12]].forEach(([x, z]) => {
     const b = mesh(BEAN_GEO, beanMat, x, 0.025, z);
     b.rotation.set(rand(-0.2, 0.2), rand(0, TAU), rand(-0.2, 0.2));
     g.add(b);
   });
-  SH.bagsGroup = new THREE.Group();
-  g.add(SH.bagsGroup);
+  SH.itemsGroup = new THREE.Group();
+  g.add(SH.itemsGroup);
+  shadows(g);
+  return g;
+}
+
+// 架上的東西：豆子是平底方袋；濾杯是濾杯組（縮到和豆袋差不多寬）
+function shelfItem(kind, item) {
+  if (kind === 'bean') return buildPouch(item);
+  const set = buildDripperSet(item.id, item.color);
+  const g = new THREE.Group();
+  const inner = new THREE.Group();
+  inner.add(set.srv, set.top);
+  inner.scale.setScalar(0.46);
+  // 把手轉到後面，拉出來時才不會伸出畫面；Chemex 的木珠留在正面
+  if (item.id !== 'chemex') inner.rotation.y = -0.85;
+  g.add(inner);
   shadows(g);
   return g;
 }
 
 function resetShelf(data) {
-  if (!SH.built && data.beans) {
-    SH.built = true;
-    SH.bags = data.beans.map((bean, i) => {
-      const bag = buildPouch(bean);
-      bag.position.set(SHELF_X[i], 0, SHELF_Z);
-      const tag = shelfTag(bean);
+  const kind = data.kind || 'bean';
+  SH.kind = kind;
+  // 每一種只做一次，之後切換顯示就好
+  if (!SH.sets[kind] && data.items) {
+    const group = new THREE.Group();
+    const items = data.items.map((item, i) => {
+      const obj = shelfItem(kind, item);
+      obj.position.set(SHELF_X[i], 0, SHELF_Z);
+      const tag = kind === 'bean'
+        ? shelfTag(item.name.split(' ').pop(), `${item.roast}・${item.level}`)
+        : shelfTag(item.name, `${item.desc.split(/[，、]/)[0]}・${item.level}`);
       tag.position.set(SHELF_X[i], -0.1, 0.505);
       tag.receiveShadow = true;
-      SH.bagsGroup.add(bag, tag);
-      bag.traverse((o) => { o.userData.bagIdx = i; });
-      tag.userData.bagIdx = i;
-      return bag;
+      group.add(obj, tag);
+      obj.traverse((o) => { o.userData.itemIdx = i; });
+      tag.userData.itemIdx = i;
+      return obj;
     });
+    SH.itemsGroup.add(group);
+    SH.sets[kind] = { group, items };
   }
-  SH.bags.forEach((bag) => {
-    bag.position.set(bag.position.x, 0, SHELF_Z);
-    bag.rotation.set(0, 0, 0);
+  Object.entries(SH.sets).forEach(([k, set]) => { set.group.visible = k === kind; });
+  SH.set = SH.sets[kind] || null;
+  SH.items = SH.set ? SH.set.items : [];
+  SH.items.forEach((obj) => {
+    obj.position.set(obj.position.x, 0, SHELF_Z);
+    obj.rotation.set(0, 0, 0);
   });
-  SH.hop = SH.bags.map(() => 1);
+  SH.hop = SH.items.map(() => 1);
   SH.sel = data.sel === undefined ? -1 : data.sel;
   SH.onPick = data.onPick || null;
 }
@@ -572,25 +599,26 @@ function selectShelf(i) {
 function updateShelf(dt) {
   SH.t += dt;
   const k = 1 - 0.003 ** dt;
-  SH.bags.forEach((bag, i) => {
+  SH.items.forEach((obj, i) => {
     const on = i === SH.sel;
-    // 選中的袋子從架上往前拉出來、輕輕跳一下，再慢慢左右轉、展示正面
+    // 選中的從架上往前拉出來、輕輕跳一下，再慢慢左右轉、展示正面
     SH.hop[i] = Math.min(1, SH.hop[i] + dt / 0.45);
-    bag.position.z = lerp(bag.position.z, on ? SHELF_Z + 0.5 : SHELF_Z, k);
-    bag.position.y = Math.sin(Math.PI * SH.hop[i]) * 0.16;
-    bag.rotation.y = lerp(bag.rotation.y, on ? Math.sin(SH.t * 1.3) * 0.2 : 0, k);
-    bag.rotation.z = on ? Math.sin(Math.PI * SH.hop[i]) * 0.06 : 0;
+    obj.position.z = lerp(obj.position.z, on ? SHELF_Z + 0.5 : SHELF_Z, k);
+    obj.position.y = Math.sin(Math.PI * SH.hop[i]) * 0.16;
+    obj.rotation.y = lerp(obj.rotation.y, on ? Math.sin(SH.t * 1.3) * 0.2 : 0, k);
+    obj.rotation.z = on ? Math.sin(Math.PI * SH.hop[i]) * 0.06 : 0;
   });
 }
 
-// 點到哪個袋子（或價卡）
+// 點到架上的哪一個（或它的價卡）
 function shelfHit(clientX, clientY) {
+  if (!SH.set) return -1;
   const r = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   camera.updateMatrixWorld();
   raycaster.setFromCamera(ndc, camera);
-  const hit = raycaster.intersectObject(SH.bagsGroup, true)[0];
-  return hit ? hit.object.userData.bagIdx : -1;
+  const hit = raycaster.intersectObject(SH.set.group, true)[0];
+  return hit ? hit.object.userData.itemIdx : -1;
 }
 
 function onShelfClick(e) {
@@ -902,6 +930,91 @@ const paperR = (d, y) => {
 const PAPER_DRY = new THREE.Color(0xfffbf2);
 const PAPER_WET = new THREE.Color(0xae8d63);
 
+// 濾杯組的外觀：玻璃下壺 + 濾杯（Chemex 是一體的玻璃壺）。展示架和濕濾紙、注水共用。
+// 原點在下壺底部中心。回傳 { srv: 下壺, top: 濾杯, coffeeR, coffeeMax: 壺裡咖啡的半徑和最高液面 }
+function buildDripperSet(id, colorHex) {
+  const srv = new THREE.Group();
+  const top = new THREE.Group();
+  const out = { srv, top };
+
+  if (id === 'chemex') {
+    // Chemex：沙漏形玻璃壺 + 木頸圈 + 皮繩 + 木珠
+    srv.add(mesh(lathe([
+      [0.001, 0], [0.86, 0], [0.93, 0.15], [0.86, 0.72], [0.37, 1.3], [0.37, 1.46], [1.0, 2.3], [1.02, 2.34],
+      [0.98, 2.33], [0.34, 1.46], [0.34, 1.3], [0.82, 0.72], [0.89, 0.15], [0.82, 0.04], [0.001, 0.04],
+    ], 96), glass(0.2)));
+    srv.add(mesh(lathe([[0.53, 1.1], [0.4, 1.27], [0.4, 1.49], [0.53, 1.66]], 48), wood(0xd2a26a, 0.5)));
+    const tie = mesh(new THREE.TorusGeometry(0.405, 0.02, 10, 64), std(0x6b4024, 0.7), 0, 1.38, 0);
+    tie.rotation.x = Math.PI / 2;
+    srv.add(tie);
+    srv.add(mesh(new THREE.SphereGeometry(0.07, 20, 14), wood(0xe0b47a, 0.4), 0, 1.38, 0.47));
+    // 壺身上的小圓點（半滿的刻度）
+    srv.add(mesh(new THREE.SphereGeometry(0.045, 16, 12), glass(0.35), 0, 0.9, 0.735));
+    out.coffeeR = 0.82;
+    out.coffeeMax = 0.6;
+    return out;
+  }
+
+  // 玻璃下壺：厚度、把手、刻度線
+  srv.add(mesh(lathe([
+    [0.001, 0], [0.76, 0], [0.8, 0.06], [0.8, 0.9], [0.56, 1.18], [0.56, 1.3], [0.53, 1.3], [0.53, 1.19],
+    [0.77, 0.9], [0.77, 0.07], [0.73, 0.04], [0.001, 0.04],
+  ], 96), glass(0.2)));
+  const h = mesh(new THREE.TorusGeometry(0.28, 0.045, 12, 32, Math.PI), glass(0.3), 0.98, 0.55, 0);
+  h.rotation.z = -Math.PI / 2;
+  srv.add(h);
+  [0.25, 0.45, 0.65].forEach((y) => srv.add(mesh(new THREE.BoxGeometry(0.16, 0.012, 0.01), std(0xffffff, 0.5), -0.15, y, 0.805)));
+  out.coffeeR = 0.75;
+  out.coffeeMax = 0.8;
+
+  if (id === 'kalita') {
+    // Kalita Wave：不鏽鋼、平底三孔、捲邊杯口、寬底座
+    const st = steel(0.24, 0xe1e5e9);
+    st.side = THREE.DoubleSide;
+    top.add(mesh(lathe([[0.52, 1.36], [0.58, 1.36], [1.0, 2.12], [1.02, 2.16], [0.98, 2.17], [0.95, 2.13], [0.53, 1.41]], 120), st));
+    const rim = mesh(new THREE.TorusGeometry(1.0, 0.022, 10, 120), st, 0, 2.165, 0);
+    rim.rotation.x = Math.PI / 2;
+    top.add(rim);
+    const floor = mesh(new THREE.CircleGeometry(0.54, 72), st, 0, 1.405, 0);
+    floor.rotation.x = -Math.PI / 2;
+    top.add(floor);
+    const holeMat = std(0x141414, 0.7);
+    [0, 1, 2].forEach((i) => {
+      const a = (i / 3) * TAU + Math.PI / 2;
+      const hole = mesh(new THREE.CircleGeometry(0.035, 20), holeMat, Math.cos(a) * 0.13, 1.408, Math.sin(a) * 0.13);
+      hole.rotation.x = -Math.PI / 2;
+      top.add(hole);
+    });
+    top.add(mesh(lathe([[0.45, 1.3], [0.92, 1.3], [0.95, 1.33], [0.92, 1.36], [0.45, 1.36]], 120), st));
+    top.add(mesh(cyl(0.5, 0.5, 0.1, 64), st, 0, 1.26, 0));
+    return out;
+  }
+
+  // Hario V60：陶瓷錐形、內壁螺旋肋、底部一個大孔、側邊把手
+  const mat = ceramic(new THREE.Color(colorHex));
+  mat.side = THREE.DoubleSide;
+  top.add(mesh(lathe([[0.18, 1.36], [0.24, 1.36], [1.08, 2.2], [1.1, 2.24], [1.06, 2.26], [1.02, 2.23], [0.17, 1.41]], 120), mat));
+  const rIn = (y) => 0.17 + (y - 1.41) * (0.85 / 0.82); // 內壁半徑
+  for (let i = 0; i < 12; i++) {
+    const a0 = (i / 12) * TAU;
+    const pts = [];
+    for (let j = 0; j <= 10; j++) {
+      const t = j / 10;
+      const y = lerp(1.5, 2.14, t);
+      const a = a0 + t * 0.9;
+      const r = rIn(y) - 0.012;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+    }
+    top.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.016, 8), mat));
+  }
+  top.add(mesh(lathe([[0.45, 1.3], [0.86, 1.3], [0.88, 1.33], [0.86, 1.36], [0.45, 1.36]], 96), mat));
+  top.add(mesh(lathe([[0.17, 1.21], [0.5, 1.21], [0.5, 1.31], [0.17, 1.31], [0.17, 1.21]], 64), mat));
+  const handle = mesh(new THREE.TorusGeometry(0.2, 0.055, 14, 24, Math.PI), mat, -0.9, 1.78, 0);
+  handle.rotation.z = Math.PI / 2;
+  top.add(handle);
+  return out;
+}
+
 function buildKettle() {
   // 原點在壺嘴尖端，這樣只要把整支壺移到注水點上方就好
   const k = new THREE.Group();
@@ -929,56 +1042,15 @@ function buildKettle() {
 function buildStation(g, game) {
   const id = game.dripper ? game.dripper.id : 'v60';
   const d = DRIPPERS[id];
-  const color = new THREE.Color(game.dripper ? game.dripper.color : '#e2725b');
   const s = { d, id };
-  s.srv = new THREE.Group();
-  s.top = new THREE.Group();
+  const set = buildDripperSet(id, game.dripper ? game.dripper.color : '#e2725b');
+  s.srv = set.srv;
+  s.top = set.top;
+  s.coffeeR = set.coffeeR;
+  s.coffeeMax = set.coffeeMax;
   g.add(s.srv, s.top);
   const sv = s.srv;
   const tp = s.top;
-
-  if (id === 'chemex') {
-    // Chemex：沙漏形玻璃壺 + 木頸圈 + 皮繩
-    sv.add(mesh(lathe([
-      [0.001, 0], [0.86, 0], [0.93, 0.15], [0.86, 0.72], [0.37, 1.3], [0.37, 1.46], [1.0, 2.3], [1.02, 2.34],
-      [0.98, 2.33], [0.34, 1.46], [0.34, 1.3], [0.82, 0.72], [0.89, 0.15], [0.82, 0.04], [0.001, 0.04],
-    ]), glass(0.2)));
-    sv.add(mesh(lathe([[0.53, 1.1], [0.4, 1.27], [0.4, 1.49], [0.53, 1.66]], 48), wood(0xd2a26a, 0.5)));
-    const tie = mesh(new THREE.TorusGeometry(0.405, 0.02, 10, 64), std(0x6b4024, 0.7), 0, 1.38, 0);
-    tie.rotation.x = Math.PI / 2;
-    sv.add(tie);
-    sv.add(mesh(new THREE.SphereGeometry(0.07, 20, 14), wood(0xe0b47a, 0.4), 0, 1.38, 0.47));
-    s.coffeeR = 0.82;
-    s.coffeeMax = 0.6;
-  } else {
-    // 玻璃下壺：厚度、把手、刻度線
-    sv.add(mesh(lathe([
-      [0.001, 0], [0.76, 0], [0.8, 0.06], [0.8, 0.9], [0.56, 1.18], [0.56, 1.3], [0.53, 1.3], [0.53, 1.19],
-      [0.77, 0.9], [0.77, 0.07], [0.73, 0.04], [0.001, 0.04],
-    ]), glass(0.2)));
-    const h = mesh(new THREE.TorusGeometry(0.28, 0.045, 12, 32, Math.PI), glass(0.3), 0.98, 0.55, 0);
-    h.rotation.z = -Math.PI / 2;
-    sv.add(h);
-    [0.25, 0.45, 0.65].forEach((y) => {
-      const t = mesh(new THREE.BoxGeometry(0.16, 0.012, 0.01), std(0xffffff, 0.5), -0.15, y, 0.805);
-      sv.add(t);
-    });
-
-    // 濾杯：陶瓷（有厚度）+ 底座 + 把手
-    const cupPts = id === 'kalita'
-      ? [[0.52, 1.36], [0.58, 1.36], [1.0, 2.12], [1.02, 2.16], [0.98, 2.17], [0.95, 2.13], [0.53, 1.41]]
-      : [[0.18, 1.36], [0.24, 1.36], [1.08, 2.2], [1.1, 2.24], [1.06, 2.26], [1.02, 2.23], [0.17, 1.41]];
-    const mat = ceramic(color);
-    mat.side = THREE.DoubleSide;
-    tp.add(mesh(lathe(cupPts, 72), mat));
-    tp.add(mesh(lathe([[0.45, 1.3], [0.86, 1.3], [0.88, 1.33], [0.86, 1.36], [0.45, 1.36]], 72), mat));
-    tp.add(mesh(cyl(0.5, 0.5, 0.1, 48), mat, 0, 1.26, 0));
-    const handle = mesh(new THREE.TorusGeometry(0.2, 0.055, 14, 24, Math.PI), mat, id === 'kalita' ? -0.95 : -0.9, 1.78, 0);
-    handle.rotation.z = Math.PI / 2;
-    tp.add(handle);
-    s.coffeeR = 0.75;
-    s.coffeeMax = 0.8;
-  }
 
   // 下壺裡的液體：側面深色、頂面稍淡
   s.liquidMats = [
@@ -1591,7 +1663,7 @@ function updateBrew(dt, now) {
 
 function setView(v, snap = false) {
   view = v;
-  const cfg = VIEWS[mode][v];
+  const cfg = mode === 'shelf' ? SHELF_CAM[SH.kind] : VIEWS[mode][v];
   camPos.fromArray(cfg, 0);
   camTarget.fromArray(cfg, 3);
   const s = mode === 'brew' ? B.s : mode === 'rinse' ? R.s : null;
