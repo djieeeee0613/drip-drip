@@ -28,4 +28,3 @@
 
 - 背景音樂：[Bossa Shop Theme](https://opengameart.org/content/bossa-shop-theme-in-low-fi-and-hd)，作者 SpringySpringo，CC0
 - 字型：[Huninn 粉圓體](https://fonts.google.com/specimen/Huninn)，justfont，SIL Open Font License 1.1
-- 3D 手部模型：[WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles) 的 generic hand，Copyright (c) 2019 Amazon，MIT License
