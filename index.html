@@ -127,17 +127,27 @@
     <p class="hint small">按住出水，手指繞圈，不要沖到邊緣的濾紙</p>
   </section>
 
-  <!-- 收尾動畫：搖壺、倒杯、店長試喝 -->
+  <!-- 店長品鑑：觀色、聞香、啜吸、細品、評分 -->
   <section class="screen" id="s-serve">
-    <div class="serve-stage" id="serve-stage"></div>
-    <div class="letterbox top"></div>
-    <div class="letterbox bottom"></div>
-    <div class="react" id="react" hidden>
-      <div class="react-fx" id="react-fx"></div>
+    <header class="top"><span class="step">品鑑</span><h2>店長品鑑中</h2></header>
+    <ol class="t-steps" id="t-steps">
+      <li data-k="look">觀色</li><li data-k="smell">聞香</li><li data-k="sip">啜吸</li><li data-k="taste">細品</li><li data-k="verdict">評分</li>
+    </ol>
+    <div class="t-stage" id="t-stage">
       <div class="react-cat" id="react-cat"></div>
+      <div class="t-counter"></div>
+      <div class="t-swatch" id="t-swatch"></div>
+      <div class="t-cup" id="t-cup"></div>
+      <div class="t-notes" id="t-notes"></div>
       <div class="react-say" id="react-say"></div>
+      <div class="react-fx" id="react-fx"></div>
     </div>
-    <p class="serve-caption" id="serve-caption"></p>
+    <div class="t-card" id="t-card">
+      <div class="t-card-head"><b>杯測表 <span class="t-legend"><i></i>理想值</span></b><small id="t-bean"></small></div>
+      <ul class="t-rows" id="t-rows"></ul>
+      <div class="t-foot"><span>總分</span><b id="t-score">--</b><span class="t-unit">/ 100</span></div>
+      <div class="t-stamp" id="t-stamp"></div>
+    </div>
     <button class="skip" id="btn-skip">跳過 ▶</button>
   </section>
 

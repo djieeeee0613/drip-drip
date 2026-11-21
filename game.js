@@ -176,6 +176,13 @@ function sfx(name) {
       tone(180, 0.4, 'triangle', 0.06, 0.25);
     } else if (name === 'yay') {
       [660, 880].forEach((f, i) => tone(f, 0.18, 'triangle', 0.07, i * 0.12));
+    } else if (name === 'sniff') {
+      noise(0.12, 'bandpass', 3200, 2600, 0.12, 2);
+      noise(0.12, 'bandpass', 3200, 2600, 0.12, 2, 0.2);
+      noise(0.16, 'bandpass', 3000, 2400, 0.14, 2, 0.4);
+    } else if (name === 'stamp') {
+      tone(95, 0.3, 'sine', 0.35);
+      noise(0.12, 'lowpass', 900, 300, 0.25);
     } else if (name === 'fanfare') {
       [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'triangle', 0.08, i * 0.13));
     }
@@ -298,6 +305,17 @@ function catSvg(mood) {
       <ellipse cx="138" cy="126" rx="20" ry="14" fill="${FUR}" stroke="${INK}" stroke-width="3"/>`;
     front = `<g fill="#5a2e14"><circle cx="124" cy="136" r="6"/><circle cx="140" cy="132" r="5"/><circle cx="156" cy="140" r="7"/>
       <circle cx="170" cy="128" r="4"/><circle cx="182" cy="142" r="6"/><circle cx="150" cy="150" r="4"/></g>`;
+  } else if (mood === 'look') {
+    // 低頭仔細看杯子（杯子在右下方）
+    const peek = (x) => `<ellipse cx="${x}" cy="100" rx="15" ry="14" fill="#f2c94c" stroke="${INK}" stroke-width="4"/>
+      <ellipse cx="${x + 5}" cy="105" rx="6" ry="8" fill="${INK}"/><circle cx="${x + 8}" cy="100" r="3" fill="#fff"/>`;
+    eyes = `${peek(70)}${peek(130)}<path d="M54 80 q16 -8 30 -2 M146 80 q-16 -8 -30 -2" ${line} stroke-width="5"/>`;
+    mouth = `<path d="M100 120 v5 M90 128 q10 4 20 0" ${line} stroke-width="4"/>`;
+  } else if (mood === 'sniff') {
+    // 閉眼聞香、細品
+    eyes = `<path d="M56 100 q14 6 28 0 M116 100 q14 6 28 0" ${line} stroke-width="6"/>`;
+    mouth = `<path d="M100 122 v4 M92 130 q8 -4 16 0" ${line} stroke-width="4"/>`;
+    front = `<path d="M80 108 q-8 -4 -12 2 M120 108 q8 -4 12 2 M76 117 q-8 0 -10 6 M124 117 q8 0 10 6" ${line} stroke-width="3" opacity=".55"/>`;
   } else if (mood === 'love' || mood === 'bow') {
     // 愛心眼、臉紅；bow 會把貝雷帽摘下來致敬
     const heart = (x) => `<path d="M${x} 108 l-14 -14 a8 8 0 0 1 14 -10 a8 8 0 0 1 14 10 z" fill="#e2463a" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>`;
@@ -1055,12 +1073,12 @@ function finish() {
 
   lastResult = { score, stars, comment, bean, dripper, method, anger: boss.count };
 
-  // 收尾動畫要用的：最大的缺點、這杯咖啡的顏色
+  // 店長品鑑要用的資料：和評鑑畫面用的是同一組數字
   const weakness = clamp(finalWaterErr / 40 - doseErr * 0.15, -1, 1);
-  const react = {
-    score, stars,
-    flaw: flaws.length && flaws[0][1] > 2 ? flaws[0][3] : null,
+  const tasting = {
+    score, stars, comment, bean, cup, ideal: p, E, weakness,
     color: coffeeColor(E, weakness),
+    rinsed: result.rinsed,
   };
 
   // 畫面
@@ -1080,7 +1098,7 @@ function finish() {
   $('breakdown').innerHTML = rows.map((r) => `<li><span>${r[0]} <small>${r[3]}</small></span><b>${Math.round(r[1])} / ${r[2]}</b></li>`).join('')
     + `<li><span>💢 惹店長生氣</span><b>${boss.count} 次</b></li>`;
   drawRadar(p, cup);
-  playServe(react, () => {
+  playServe(tasting, () => {
     show('s-result');
     countUp($('score'), score);
     beep(stars >= 2 ? 990 : 330, 0.25);
@@ -1099,107 +1117,319 @@ function coffeeColor(E, weak) {
   return (Math.round(c[0]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[2]);
 }
 
-/* ---------- 收尾動畫：搖壺、倒杯、店長試喝 ---------- */
+/* ---------- 店長品鑑：觀色 → 聞香 → 啜吸 → 細品 → 評分 ---------- */
+// 每一步看到、聞到、喝到的東西，都直接從這杯的計算結果來，
+// 所以動畫裡店長的反應和最後的分數、評語一定對得上。
 
 const serveState = { timers: [], done: null, active: false };
 const serveTimer = (fn, ms) => serveState.timers.push(setTimeout(fn, ms));
-const CAPTIONS = { lift: '移開濾杯', swirl: '搖一搖分享壺，讓咖啡更均勻', pour: '倒進品鑑杯', serve: '請店長品鑑' };
-const CUE_SFX = { swirl: 'swirl', pour: 'pour', serve: 'clink' };
+const hexColor = (n) => `#${n.toString(16).padStart(6, '0')}`;
+const mixColor = (a, b, k) => {
+  const ch = (n, s) => (n >> s) & 255;
+  const m = (s) => Math.round(ch(a, s) + (ch(b, s) - ch(a, s)) * k);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+};
 
-function playServe(react, done) {
+// 五個風味項目：偏高 / 偏低時的標籤，以及店長會不會因此皺眉（mood 為 null 就只標示不反應）
+const TASTE_ROWS = [
+  { k: '酸', ok: '明亮', hi: ['太酸', 'sour', '好酸！舌頭都縮起來了', 'shake'], lo: ['不夠明亮', 'watch', '酸質不見了，喝起來好平', 'tilt'] },
+  { k: '甜', ok: '甜感飽滿', hi: ['很甜', null], lo: ['甜感不足', 'watch', '甜感出不來……', 'tilt'] },
+  { k: '苦', ok: '適中', hi: ['太苦', 'bitter', '好苦……舌頭發麻', 'shiver'], lo: ['苦味很輕', null] },
+  { k: '醇厚', ok: '圓潤', hi: ['太厚重', 'strong', '好濃！毛都炸起來了！', 'puff'], lo: ['太稀薄', 'weak', '口感好稀，這是水嗎？', 'tilt'] },
+  { k: '香氣', ok: '迷人', hi: ['很香', null], lo: ['香氣不足', 'watch', '香氣都跑掉了……', 'tilt'] },
+];
+
+// 把這一杯的數據整理成品鑑時要演出的內容
+function buildTasting(t) {
+  // 觀色：顏色是由萃取度（E）和濃淡（weakness）決定的，這裡用同樣的數字描述它
+  const ex = t.E / 1.2;
+  const wk = t.weakness;
+  let look;
+  if (Math.abs(wk) > Math.max(0.35, Math.abs(ex))) {
+    look = wk > 0
+      ? { text: '顏色偏淡、很透光', say: '顏色好淡……水是不是加太多了？', good: false }
+      : { text: '濃到不透光', say: '顏色好深，會不會太濃？', good: false };
+  } else if (ex < -0.4) {
+    look = { text: '偏淺的琥珀色', say: '顏色偏淺，可能萃取不足。', good: false };
+  } else if (ex > 0.4) {
+    look = { text: '偏黑的深褐色', say: '顏色太深，可能萃取過頭了。', good: false };
+  } else {
+    look = { text: '透亮的紅棕色', say: '顏色很漂亮，透亮的紅棕色！', good: true };
+  }
+
+  // 聞香：香氣分數和杯測表上「香氣」那一列用的是同一個數字
+  const notes = t.bean.desc.split('、');
+  const d = t.cup.香氣 - t.ideal.香氣;
+  const bright = d >= -1 ? notes.length : d >= -3 ? Math.max(1, notes.length - 1) : 0;
+  let smellSay;
+  if (bright === notes.length) smellSay = `聞到${notes.slice(0, 2).join('和')}了～`;
+  else if (bright > 0) smellSay = `香氣有點弱，只聞到${notes.slice(0, bright).join('、')}。`;
+  else smellSay = '幾乎聞不到香氣……';
+  if (!t.rinsed) smellSay = '嗯？有一股紙味……';
+  const smell = { notes: notes.map((n, i) => ({ text: n, muted: i >= bright })), paper: !t.rinsed, say: smellSay };
+
+  // 細品：每一項和這支豆子的理想風味比，差 1 分以內算剛好
+  const rows = TASTE_ROWS.map((def) => {
+    const v = t.cup[def.k];
+    const i = t.ideal[def.k];
+    const diff = v - i;
+    const status = diff > 1 ? 'hi' : diff < -1 ? 'lo' : 'ok';
+    const info = status === 'ok' ? [def.ok, null] : def[status];
+    let react = info[1] ? { mood: info[1], say: info[2], anim: info[3] } : null;
+    if (react && def.k === '香氣' && !t.rinsed) react = { mood: 'paper', say: '紙味把香氣都蓋掉了……', anim: 'shake' };
+    return { k: def.k, v, i, diff, status, tag: info[0], react };
+  });
+  // 三星的杯子不挑毛病；其他就挑最明顯的一項皺眉。
+  // 酸、苦、太濃、太淡、紙味這些「有個性」的缺點優先，只是「差一點」的（watch）打六折
+  const weight = (r) => Math.abs(r.diff) * (r.react.mood === 'watch' ? 0.6 : 1);
+  const worst = t.stars < 3
+    ? rows.filter((r) => r.react && Math.abs(r.diff) > 1.5).sort((a, b) => weight(b) - weight(a))[0] || null
+    : null;
+  const summary = rows.every((r) => r.status === 'ok') ? '每一項都很平衡！' : t.stars === 3 ? '整體很協調喵。' : '有幾項沒到位喵……';
+
+  // 評分：印章、最後的反應和評鑑畫面一致
+  const stamp = t.score >= 100 ? '完美' : ['重沖！', '再加油', '還不錯', '超好喝'][t.stars];
+  let finale;
+  if (t.score >= 100) finale = [{ mood: 'bow', anim: 'bow', fx: 'confetti', sfx: 'fanfare', say: '完美！本店長向你脫帽致敬！', ms: 2600 }];
+  else if (t.stars === 3) finale = [{ mood: 'love', anim: 'bounce', fx: 'hearts', sfx: 'purr', say: t.comment, ms: 2600 }];
+  else if (t.stars === 2) finale = [{ mood: 'ok', anim: 'nod', fx: 'sparkle', sfx: 'yay', say: t.comment, ms: 2600 }];
+  else if (t.stars === 1) finale = [{ mood: 'watch', anim: 'push', sfx: 'hmm', say: t.comment, ms: 2600 }];
+  else {
+    finale = [
+      { mood: 'spit', anim: 'shake', fx: 'spray', sfx: 'spit', say: '噗——！', ms: 1100 },
+      { mood: 'angry', anim: 'rage', sfx: 'hiss', say: t.comment, ms: 2600 },
+    ];
+  }
+  return { look, smell, rows, worst, summary, stamp, finale };
+}
+
+// 品鑑杯：杯面顏色就是這杯咖啡的顏色，分數越高油脂泡沫越多
+function cupSvg(color, foam) {
+  const INK = '#4a2f1d';
+  const crema = hexColor(mixColor(color, 0xd9a56a, 0.55));
+  const bubbles = Array.from({ length: Math.round(3 + foam * 10) }, (_, i) => {
+    const a = (i / (3 + foam * 10)) * Math.PI * 2 + 0.4;
+    return `<circle cx="${(80 + Math.cos(a) * 40).toFixed(1)}" cy="${(48 + Math.sin(a) * 6.5).toFixed(1)}" r="${(1.2 + (i % 3) * 0.6).toFixed(1)}" fill="${crema}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 160 132" xmlns="http://www.w3.org/2000/svg">
+    <g class="steam" fill="none" stroke="#fffaf0" stroke-width="5" stroke-linecap="round">
+      <path d="M62 36 q-8 -9 0 -18 q8 -9 0 -18"/><path d="M80 32 q-8 -9 0 -18 q8 -9 0 -18"/><path d="M98 36 q-8 -9 0 -18 q8 -9 0 -18"/>
+    </g>
+    <ellipse cx="80" cy="118" rx="70" ry="11" fill="#fffaf0" stroke="${INK}" stroke-width="4"/>
+    <ellipse cx="80" cy="116" rx="44" ry="5.5" fill="#eadfca"/>
+    <path d="M126 60 q24 0 22 18 q-2 18 -26 16" fill="none" stroke="${INK}" stroke-width="10" stroke-linecap="round"/>
+    <path d="M126 60 q24 0 22 18 q-2 18 -26 16" fill="none" stroke="#fffaf0" stroke-width="4" stroke-linecap="round"/>
+    <path d="M30 48 h100 l-9 52 q-41 15 -82 0 z" fill="#fffaf0" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M42 58 l7 38" stroke="#efe4cf" stroke-width="7" stroke-linecap="round"/>
+    <ellipse cx="80" cy="48" rx="50" ry="10" fill="${hexColor(color)}" stroke="${INK}" stroke-width="4"/>
+    <ellipse cx="80" cy="48" rx="43" ry="7" fill="none" stroke="${crema}" stroke-width="${(2 + foam * 4).toFixed(1)}" opacity="${(0.35 + foam * 0.65).toFixed(2)}"/>
+    ${bubbles}
+    <ellipse cx="66" cy="45.5" rx="12" ry="2.2" fill="#fff" opacity=".35"/>
+    <ellipse cx="80" cy="48" rx="52.5" ry="11.5" fill="none" stroke="#d8b25a" stroke-width="2"/>
+  </svg>`;
+}
+
+function playServe(t, done) {
   serveState.timers.forEach(clearTimeout);
   serveState.timers = [];
   serveState.done = done;
   serveState.active = true;
-  $('react').hidden = true;
-  $('react-fx').innerHTML = '';
-  $('serve-caption').textContent = '';
   show('s-serve');
-  onServeCue('react', react);
+  runTasting(t);
 }
 
-function onServeCue(cue, react) {
-  if (!serveState.active) return;
-  if (CUE_SFX[cue]) sfx(CUE_SFX[cue]);
-  const cap = $('serve-caption');
-  cap.textContent = CAPTIONS[cue] || '';
-  cap.classList.remove('show');
-  void cap.offsetWidth;
-  cap.classList.add('show');
-  if (cue === 'react') runReaction(react);
-}
+function runTasting(t) {
+  const T = buildTasting(t);
+  const at = (ms, fn) => serveTimer(() => { if (serveState.active) fn(); }, ms);
+  const stage = $('t-stage');
+  const catEl = $('react-cat');
+  const cup = $('t-cup');
 
-const FLAW_FACE = {
-  sour: ['sour', '好酸！', 'shake'],
-  bitter: ['bitter', '好苦……', 'shiver'],
-  weak: ['weak', '這是……水嗎？', 'tilt'],
-  strong: ['strong', '好濃！毛都炸起來了！', 'puff'],
-  paper: ['paper', '一股紙味……', 'shake'],
-  tech: ['watch', '味道有點雜……', 'tilt'],
-};
+  // 重設畫面
+  $('react-fx').innerHTML = '';
+  $('t-notes').innerHTML = '';
+  $('react-say').textContent = '';
+  $('btn-skip').textContent = '跳過 ▶';
+  $('t-bean').textContent = `${t.bean.name}・${t.bean.roast}`;
+  $('t-score').textContent = '--';
+  $('t-stamp').className = 't-stamp';
+  $('t-stamp').innerHTML = '';
+  document.querySelectorAll('#t-steps li').forEach((li) => { li.className = ''; });
+  $('t-rows').innerHTML = T.rows.map((r) => `<li class="t-row" data-k="${r.k}"><span class="t-label">${r.k}</span>`
+    + `<span class="t-bar"><i class="t-fill"></i><i class="t-ideal" style="left:${r.i * 10}%"></i></span>`
+    + '<span class="t-tag">待評</span></li>').join('');
+  const swatch = $('t-swatch');
+  swatch.className = 't-swatch';
+  swatch.innerHTML = `<i style="background:${hexColor(t.color)}"></i><span>色澤<b>${T.look.text}</b></span>`;
+  cup.className = 't-cup';
+  cup.innerHTML = cupSvg(t.color, t.stars / 3);
+  setCat('watch');
 
-function reactionSteps(r) {
-  const steps = [{ mood: 'sip', say: '嘶溜～', anim: 'sip', sfx: 'sip', ms: 1300 }];
-  if (r.stars < 3 && r.flaw) {
-    const f = FLAW_FACE[r.flaw];
-    steps.push({ mood: f[0], say: f[1], anim: f[2], sfx: 'hmm', ms: 1300 });
-  }
-  if (r.score >= 100) steps.push({ mood: 'bow', say: '完美！本店長向你脫帽致敬！', anim: 'bow', fx: 'confetti', sfx: 'fanfare', ms: 2600 });
-  else if (r.stars === 3) steps.push({ mood: 'love', say: '呼嚕呼嚕……再來一杯！', anim: 'bounce', fx: 'hearts', sfx: 'purr', ms: 2400 });
-  else if (r.stars === 2) steps.push({ mood: 'ok', say: '嗯～還不錯喝', anim: 'nod', sfx: 'yay', ms: 1900 });
-  else if (r.stars === 1) steps.push({ mood: 'watch', say: '還差得遠喵', anim: 'push', sfx: 'hmm', ms: 1900 });
-  else {
-    steps.push({ mood: 'spit', say: '噗——！', anim: 'shake', fx: 'spray', sfx: 'spit', ms: 1000 });
-    steps.push({ mood: 'angry', say: '這是什麼東西！重沖！', anim: 'rage', sfx: 'hiss', ms: 1900 });
-  }
-  return steps;
-}
+  // 店長嘴巴、鼻子在舞台上的位置（貓的 SVG 是 200×240）
+  const spot = (fx, fy) => {
+    const s = stage.getBoundingClientRect();
+    const c = catEl.getBoundingClientRect();
+    return { x: c.left - s.left + c.width * fx, y: c.top - s.top + c.height * fy };
+  };
 
-function runReaction(r) {
-  $('react').hidden = false;
-  let at = 0;
-  reactionSteps(r).forEach((st) => {
-    serveTimer(() => showReactStep(st), at);
-    at += st.ms;
+  // 0. 品鑑杯端上來
+  at(0, () => { cup.classList.add('in'); });
+  at(450, () => sfx('clink'));
+
+  // 1. 觀色
+  at(900, () => {
+    setStep('look');
+    setCat('look');
+    say(T.look.say);
+    swatch.classList.add('show', T.look.good ? 'good' : 'warn');
+    if (!T.look.good) sfx('hmm');
   });
-  serveTimer(finishServe, at + 200);
+
+  // 2. 聞香：咖啡的風味飄向店長的鼻子，聞不到的會變灰
+  at(2700, () => {
+    setStep('smell');
+    setCat('sniff', 'sniffing');
+    sfx('sniff');
+    const s = stage.getBoundingClientRect();
+    const c = cup.getBoundingClientRect();
+    const from = { x: c.left - s.left + c.width / 2, y: c.top - s.top + c.height * 0.2 };
+    const nose = spot(0.5, 0.48);
+    const list = T.smell.notes.map((n) => ({ ...n }));
+    if (T.smell.paper) list.push({ text: '紙味', muted: false, paper: true });
+    list.forEach((n, i) => {
+      const el = document.createElement('span');
+      el.className = `t-note${n.muted ? ' muted' : ''}${n.paper ? ' paper' : ''}`;
+      el.textContent = n.text;
+      const spread = (i - (list.length - 1) / 2);
+      el.style.left = `${from.x + spread * 34}px`;
+      el.style.top = `${from.y - Math.abs(spread) * 6}px`;
+      el.style.setProperty('--tx', `${nose.x - from.x - spread * 34 + spread * 44}px`);
+      el.style.setProperty('--ty', `${nose.y - from.y - Math.abs(spread) * 18}px`);
+      el.style.animationDelay = `${i * 0.28}s`;
+      $('t-notes').appendChild(el);
+    });
+  });
+  at(3700, () => {
+    say(T.smell.say);
+    if (T.smell.paper) { setCat('paper', 'shake'); sfx('hmm'); }
+  });
+
+  // 3. 啜吸：杯子端到嘴邊
+  at(5100, () => {
+    setStep('sip');
+    $('t-notes').innerHTML = '';
+    const s = cup.getBoundingClientRect();
+    const mouth = spot(0.5, 0.56);
+    const st = stage.getBoundingClientRect();
+    cup.style.setProperty('--mx', `${mouth.x - (s.left - st.left + s.width / 2)}px`);
+    cup.style.setProperty('--my', `${mouth.y - (s.top - st.top + s.height * 0.4)}px`);
+    cup.classList.add('lift');
+  });
+  at(5650, () => { setCat('sip', 'sip'); sfx('sip'); say('嘶溜～'); });
+
+  // 4. 細品：一項一項填杯測表，最明顯的缺點讓店長皺眉
+  at(6800, () => {
+    setStep('taste');
+    cup.classList.remove('lift');
+    setCat('sniff');
+    say('細細品嚐……');
+  });
+  let ms = 7200;
+  T.rows.forEach((r, i) => {
+    at(ms, () => fillRow(r, i));
+    if (r === T.worst) at(ms + 350, () => { setCat(r.react.mood, r.react.anim); say(r.react.say); sfx('hmm'); });
+    ms += 620;
+  });
+  at(ms + 250, () => {
+    if (!T.worst) { setCat(t.stars >= 2 ? 'ok' : 'watch', t.stars >= 2 ? 'nod' : ''); say(T.summary); }
+  });
+
+  // 5. 評分：算總分、蓋章、最後的反應
+  const v = ms + 1500;
+  at(v, () => {
+    setStep('verdict');
+    setCat('watch');
+    say('評分中……');
+    countUp($('t-score'), t.score);
+  });
+  at(v + 1100, () => {
+    const st = $('t-stamp');
+    st.innerHTML = `<small>${'★'.repeat(t.stars)}${'☆'.repeat(3 - t.stars)}</small>${T.stamp}`;
+    st.className = `t-stamp slam s${t.stars}`;
+    $('t-card').classList.remove('thud');
+    void $('t-card').offsetWidth;
+    $('t-card').classList.add('thud');
+    sfx('stamp');
+  });
+  let f = v + 1450;
+  T.finale.forEach((step) => {
+    at(f, () => {
+      setCat(step.mood, step.anim);
+      say(step.say);
+      if (step.fx) spawnFx(step.fx, spot(0.5, 0.56));
+      if (step.sfx) sfx(step.sfx);
+      $('app').classList.toggle('shake', step.anim === 'rage');
+      $('btn-skip').textContent = '看結果 ▶';
+    });
+    f += step.ms;
+  });
+  at(f + 1200, finishServe);
 }
 
-function showReactStep(st) {
+function setStep(k) {
+  let passed = true;
+  document.querySelectorAll('#t-steps li').forEach((li) => {
+    if (li.dataset.k === k) { li.className = 'now'; passed = false; } else li.className = passed ? 'done' : '';
+  });
+}
+
+function setCat(mood, anim = '') {
   const cat = $('react-cat');
-  cat.innerHTML = catSvg(st.mood);
+  cat.innerHTML = catSvg(mood);
   cat.className = 'react-cat';
-  void cat.offsetWidth;
-  cat.classList.add(st.anim);
-  const say = $('react-say');
-  say.textContent = st.say;
-  say.classList.remove('pop');
-  void say.offsetWidth;
-  say.classList.add('pop');
-  if (st.sfx) sfx(st.sfx);
-  if (st.fx) spawnFx(st.fx);
-  $('app').classList.toggle('shake', st.anim === 'rage');
+  if (anim) {
+    void cat.offsetWidth;
+    cat.classList.add(anim);
+  }
 }
 
-// 愛心、彩帶、噴出來的咖啡
-function spawnFx(kind) {
+function say(text) {
+  const el = $('react-say');
+  el.textContent = text;
+  el.classList.remove('pop');
+  void el.offsetWidth;
+  el.classList.add('pop');
+}
+
+function fillRow(r, i) {
+  const li = document.querySelector(`#t-rows li[data-k="${r.k}"]`);
+  li.classList.add(r.status);
+  li.querySelector('.t-fill').style.width = `${Math.max(4, r.v * 10)}%`;
+  const tag = li.querySelector('.t-tag');
+  tag.textContent = `${r.status === 'hi' ? '▲ ' : r.status === 'lo' ? '▼ ' : '✓ '}${r.tag}`;
+  tag.classList.add('pop');
+  beep(620 + i * 90, 0.06);
+}
+
+// 愛心、彩帶、小星星、噴出來的咖啡（from：店長嘴巴在舞台上的位置）
+function spawnFx(kind, from) {
   const box = $('react-fx');
-  const n = { hearts: 14, confetti: 46, spray: 26 }[kind];
+  const n = { hearts: 14, confetti: 46, spray: 26, sparkle: 10 }[kind];
   const colors = ['#e2725b', '#ffd95a', '#8fb56a', '#8fc4e0', '#d9893b'];
   for (let i = 0; i < n; i++) {
     const el = document.createElement('i');
     const r = Math.random;
-    if (kind === 'hearts') {
-      el.textContent = ['💗', '💕', '✨'][i % 3];
-      el.style.cssText = `left:${20 + r() * 60}%;top:${30 + r() * 25}%;--dx:${(r() - 0.5) * 120}px;font-size:${18 + r() * 16}px;`
-        + `animation:fxUp ${1.4 + r()}s ${r() * 0.8}s ease-out forwards`;
+    if (kind === 'hearts' || kind === 'sparkle') {
+      el.textContent = kind === 'hearts' ? ['💗', '💕', '✨'][i % 3] : '✨';
+      el.style.cssText = `left:${from.x - 40 + r() * 80}px;top:${from.y - 30 - r() * 40}px;--dx:${(r() - 0.5) * 140}px;font-size:${16 + r() * 14}px;`
+        + `animation:fxUp ${1.3 + r()}s ${r() * 0.7}s ease-out forwards`;
     } else if (kind === 'confetti') {
       el.className = 'confetti';
       el.style.cssText = `left:${r() * 100}%;top:-5%;background:${colors[i % colors.length]};--r:${(r() - 0.5) * 900}deg;`
         + `animation:fxFall ${1.6 + r() * 1.2}s ${r() * 0.6}s linear forwards`;
     } else {
       el.className = 'drop';
-      el.style.cssText = `left:54%;top:30%;--dx:${60 + r() * 160}px;--dy:${(r() - 0.3) * 140}px;`
+      el.style.cssText = `left:${from.x}px;top:${from.y}px;--dx:${60 + r() * 160}px;--dy:${(r() - 0.3) * 120}px;`
         + `animation:fxSpray ${0.5 + r() * 0.4}s ease-out forwards`;
     }
     box.appendChild(el);
