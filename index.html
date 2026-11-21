@@ -9,6 +9,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Huninn&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
 </head>
 <body>
 <div id="app">
@@ -64,6 +72,7 @@
   <section class="screen" id="s-weigh">
     <header class="top"><span class="step">4 / 7</span><h2>秤豆</h2></header>
     <p class="hint" id="weigh-hint"></p>
+    <div class="stage3d" id="stage-weigh"></div>
     <div class="scale">
       <div class="bowl" id="bowl"></div>
       <div class="scale-body"><span id="weigh-val">0.0</span> g</div>
@@ -172,5 +181,6 @@
 
 </div>
 <script src="game.js"></script>
+<script type="module" src="scene3d.js"></script>
 </body>
 </html>

@@ -66,6 +66,12 @@ function show(id) {
   const watching = ['s-weigh', 's-grind', 's-rinse', 's-brew'].includes(id);
   $('boss').hidden = !watching;
   if (watching && !$('boss').classList.contains('rage')) $('boss-cat').innerHTML = catSvg('watch');
+  // 秤豆、磨豆、濕濾紙、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
+  if (window.Scene3D) {
+    const hosts = { 's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-rinse': ['rinse', 'rinse'], 's-brew': ['brew-wrap', 'brew'] };
+    if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], Object.assign({}, game, { rinsed: result.rinsed }));
+    else Scene3D.unmount();
+  }
 }
 
 /* ---------- 監督店長：犯錯就生氣來干擾 ---------- */
@@ -78,6 +84,7 @@ function bossRage(msg) {
   if (now < boss.until) return false;
   boss.until = now + 3500;
   boss.count++;
+  if (window.Scene3D) Scene3D.shake();
   $('boss-cat').innerHTML = catSvg('angry');
   $('boss-say').textContent = msg;
   // 重新觸發動畫：拍桌震動 + 貓掌橫掃
@@ -506,6 +513,7 @@ function weighLoop(t) {
   weigh.last = t;
   weigh.g += dt * (4 + Math.random() * 3);
   $('weigh-val').textContent = weigh.g.toFixed(1);
+  if (window.Scene3D) Scene3D.setWeigh(weigh.g, true);
   if (!weigh.warned && weigh.g > game.method.dose + 1) {
     weigh.warned = true;
     bossRage('倒太多了喵！');
@@ -532,6 +540,7 @@ function weighLoop(t) {
   const stop = () => {
     weigh.pouring = false;
     btn.classList.remove('down');
+    if (window.Scene3D) Scene3D.setWeigh(weigh.g, false);
   };
   btn.addEventListener('pointerup', stop);
   btn.addEventListener('pointercancel', stop);
@@ -567,6 +576,7 @@ function updateGrindLabel() {
   const v = +$('grind-size').value;
   $('grind-size-val').textContent = v;
   $('grind-size-name').textContent = grindName(v);
+  if (window.Scene3D) Scene3D.setGrind({ size: v });
 }
 $('grind-size').addEventListener('input', updateGrindLabel);
 
@@ -595,6 +605,7 @@ trackSpin($('grinder'), (d, a) => {
   }
   const p = clamp(grind.total / (GRIND_TURNS * 2 * Math.PI));
   $('crank').style.transform = `rotate(${a}rad)`;
+  if (window.Scene3D) Scene3D.setGrind({ angle: a, p });
   $('grinder-fill').style.height = `${p * 100}%`;
   if (Math.floor(grind.total / 1.2) !== Math.floor((grind.total - Math.abs(d)) / 1.2)) beep(180 + Math.random() * 60, 0.03);
   if (p >= 1) {
@@ -630,15 +641,16 @@ function startRinse() {
   $('btn-rinse-done').disabled = true;
   show('s-rinse');
 }
-trackSpin($('rinse'), (d) => {
+trackSpin($('rinse'), (d, a) => {
   rinse.total += Math.abs(d);
   const p = clamp(rinse.total / (2 * Math.PI));
   $('rinse-wet').style.strokeDashoffset = 440 * (1 - p);
+  if (window.Scene3D) Scene3D.setRinse({ angle: a, p, pouring: true });
   if (p >= 1 && $('btn-rinse-done').disabled) {
     $('btn-rinse-done').disabled = false;
     beep(880, 0.15);
   }
-});
+}, () => { if (window.Scene3D) Scene3D.setRinse({ pouring: false }); });
 $('btn-rinse-skip').addEventListener('click', () => { result.rinsed = false; startBrew(); bossRage('竟敢跳過？！'); });
 $('btn-rinse-done').addEventListener('click', () => { result.rinsed = true; beep(); startBrew(); });
 
@@ -665,6 +677,12 @@ function startBrew() {
 }
 
 function brewPos(e) {
+  if (window.Scene3D && Scene3D.active) {
+    const p = Scene3D.brewPoint(e.clientX, e.clientY);
+    brew.x = p.x;
+    brew.y = p.y;
+    return;
+  }
   const r = cv.getBoundingClientRect();
   brew.x = (e.clientX - r.left) * (cv.width / r.width);
   brew.y = (e.clientY - r.top) * (cv.height / r.height);
@@ -802,7 +820,14 @@ function brewLoop(t) {
     }
   }
 
-  drawBrew(stages);
+  if (window.Scene3D && Scene3D.active) {
+    Scene3D.setBrew({
+      px: brew.px, py: brew.py, pouring: brew.pouring, water: brew.water,
+      total: stages[stages.length - 1].cum, pool: brew.pool, onEdge: brew.onEdge, phase: brew.phase,
+    });
+  } else {
+    drawBrew(stages);
+  }
   requestAnimationFrame(brewLoop);
 }
 
