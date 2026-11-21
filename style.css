@@ -641,6 +641,37 @@ html, body {
 }
 #app.has3d .grinder-body, #app.has3d .crank { display: none; }
 
+/* 3D 豆子架：只在選豆那一步出現，下面的卡片縮小 */
+#app.has3d #stage-shelf { display: none; }
+#app.has3d #s-pick.shelf #stage-shelf {
+  display: block;
+  height: min(34dvh, 270px);
+  border: 3px solid var(--ink);
+  border-radius: 22px;
+  overflow: hidden;
+  background: #f3e8d6;
+  box-shadow: 0 6px 0 #cdb891, 0 6px 0 3px var(--ink), 0 18px 16px rgba(74, 47, 29, .18);
+  touch-action: manipulation;
+}
+#stage-shelf .gl { border-radius: 19px; }
+.shelf-hint {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  z-index: 2;
+  padding: 2px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 99px;
+  background: var(--paper);
+  font-size: 13px;
+  pointer-events: none;
+}
+#app.has3d #s-pick.shelf .cards { gap: 8px; }
+#app.has3d #s-pick.shelf .card { padding: 6px 12px; }
+#app.has3d #s-pick.shelf .card .art { width: 50px; }
+#app.has3d #s-pick.shelf .card h3 { font-size: 17px; }
+#app.has3d #s-pick.shelf .card p { font-size: 13px; }
+
 /* 3D 濕濾紙 */
 #app.has3d .rinse {
   position: relative;

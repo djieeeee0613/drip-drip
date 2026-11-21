@@ -3,13 +3,13 @@
 /* ---------- 資料 ---------- */
 
 const BEANS = [
-  { id: 'yirga', name: '衣索比亞 耶加雪菲', flag: '🇪🇹', roast: '淺焙', color: '#b9824f',
+  { id: 'yirga', name: '衣索比亞 耶加雪菲', flag: '🇪🇹', en: 'Yirgacheffe', bag: '#2a5f5d', foil: '#e2ac90', roast: '淺焙', color: '#b9824f',
     desc: '花香、柑橘、茶感', level: '標準', tag: 'mid', diff: 1.0, grind: 5,
     profile: { 酸: 8, 甜: 7, 苦: 2, 醇厚: 4, 香氣: 9 } },
-  { id: 'geisha', name: '巴拿馬 藝伎', flag: '🇵🇦', roast: '淺焙', color: '#c99a63',
+  { id: 'geisha', name: '巴拿馬 藝伎', flag: '🇵🇦', en: 'Geisha', bag: '#342c48', foil: '#dcbf7c', roast: '淺焙', color: '#c99a63',
     desc: '茉莉、佛手柑、蜜桃', level: '困難', tag: 'hard', diff: 1.3, grind: 5,
     profile: { 酸: 7, 甜: 9, 苦: 1, 醇厚: 4, 香氣: 10 } },
-  { id: 'huila', name: '哥倫比亞 薇拉', flag: '🇨🇴', roast: '中焙', color: '#7a4a2b',
+  { id: 'huila', name: '哥倫比亞 薇拉', flag: '🇨🇴', en: 'Huila', bag: '#9c4c31', foil: '#f4dcae', roast: '中焙', color: '#7a4a2b',
     desc: '焦糖、堅果、紅蘋果', level: '新手', tag: '', diff: 0.8, grind: 4,
     profile: { 酸: 5, 甜: 8, 苦: 4, 醇厚: 7, 香氣: 6 } },
 ];
@@ -69,7 +69,14 @@ function show(id) {
   // 秤豆、磨豆、濕濾紙、注水用 3D 場景（載入失敗時 Scene3D 不存在，就維持 2D）
   if (window.Scene3D) {
     const hosts = { 's-weigh': ['stage-weigh', 'weigh'], 's-grind': ['grinder', 'grind'], 's-rinse': ['rinse', 'rinse'], 's-brew': ['brew-wrap', 'brew'] };
-    if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], Object.assign({}, game, { rinsed: result.rinsed }));
+    if (id === 's-pick' && pickIdx === 0) hosts['s-pick'] = ['stage-shelf', 'shelf'];
+    const data = Object.assign({}, game, {
+      rinsed: result.rinsed,
+      beans: BEANS,
+      sel: BEANS.indexOf(game.bean),
+      onPick: (i) => { const c = $('pick-cards').children[i]; if (c) c.click(); },
+    });
+    if (hosts[id]) Scene3D.mount($(hosts[id][0]), hosts[id][1], data);
     else Scene3D.unmount();
   }
 }
@@ -385,11 +392,20 @@ function catSvg(mood) {
 }
 
 function beanArt(b) {
-  return `<svg viewBox="0 0 80 80"><ellipse cx="40" cy="42" rx="24" ry="32" fill="${b.color}" stroke="#4a2f1d" stroke-width="4" transform="rotate(20 40 42)"/>
-    <path d="M46 14 q-18 26 -8 56" fill="none" stroke="#4a2f1d" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="30" cy="36" r="3" fill="#4a2f1d"/><circle cx="50" cy="40" r="3" fill="#4a2f1d"/>
-    <path d="M34 50 q6 6 12 1" fill="none" stroke="#4a2f1d" stroke-width="3" stroke-linecap="round"/>
-    <text x="58" y="76" font-size="22">${b.flag}</text></svg>`;
+  // 和豆子架上一樣的平底方袋：正面、右側摺、頂端熱封、燙金徽章
+  return `<svg viewBox="0 0 80 80"><g stroke="#4a2f1d" stroke-width="3" stroke-linejoin="round">
+      <path d="M50 22 L62 26 L62 70 L50 74 Z" fill="${b.bag}"/>
+      <path d="M50 22 L62 26 L62 70 L50 74 Z" fill="#000" fill-opacity=".28"/>
+      <path d="M12 22 H50 V74 H12 Z" fill="${b.bag}"/>
+      <path d="M11 9 H51 V22 H11 Z" fill="${b.bag}"/>
+      <path d="M51 10 L57 14 L62 26 L50 22 Z" fill="${b.bag}"/>
+    </g>
+    <path d="M14 13 H48 M14 16 H48 M14 19 H48" stroke="#fff" stroke-opacity=".3" stroke-width="1.2"/>
+    <g fill="${b.foil}"><rect x="16" y="30" width="2" height="10"/><rect x="20" y="31" width="16" height="3" rx="1"/><rect x="20" y="36" width="12" height="3" rx="1"/>
+      <rect x="16" y="66" width="22" height="2.4" rx="1"/></g>
+    <circle cx="37" cy="52" r="9.5" fill="none" stroke="${b.foil}" stroke-width="2"/>
+    <path d="M32.5 50 h9 q-.6 6 -4.5 6 t-4.5 -6 Z" fill="${b.foil}"/>
+    <circle cx="31" cy="27" r="2.6" fill="#f0ece4" stroke="#4a2f1d" stroke-width="1.2"/></svg>`;
 }
 
 function dripperArt(d) {
@@ -470,6 +486,7 @@ function startPick(i) {
   $('pick-step').textContent = `${i + 1} / 7`;
   $('pick-title').textContent = p.title;
   $('btn-pick-next').disabled = true;
+  $('s-pick').classList.toggle('shelf', p.key === 'bean');
   const box = $('pick-cards');
   box.innerHTML = '';
   p.list.forEach((item) => {
@@ -481,6 +498,7 @@ function startPick(i) {
       el.classList.add('sel');
       game[p.key] = item;
       $('btn-pick-next').disabled = false;
+      if (p.key === 'bean' && window.Scene3D && Scene3D.active) Scene3D.setShelf(p.list.indexOf(item));
       beep(520);
     });
     box.appendChild(el);

@@ -1,4 +1,4 @@
-// 秤豆、磨豆、濕濾紙、注水四個步驟的 3D 場景（最後的店長品鑑是 2D 動畫，不在這裡）。
+// 選豆的豆子架，和秤豆、磨豆、濕濾紙、注水四個步驟的 3D 場景（最後的店長品鑑是 2D 動畫，不在這裡）。
 // 模型全部用程式組出來（不載入外部模型檔），材質用物理光照、環境反射和即時陰影。
 // 載入失敗（沒網路、瀏覽器不支援 import map 或 WebGL）時 window.Scene3D 不存在，遊戲自動改用 2D 畫面。
 import * as THREE from 'three';
@@ -136,45 +136,6 @@ const dialTex = canvasTex(1024, 128, (x, w, h) => {
   }
 });
 
-// 豆袋的牛皮紙 + 標籤（換豆子時重畫）
-const bagCanvas = document.createElement('canvas');
-bagCanvas.width = 512;
-bagCanvas.height = 640;
-const bagTex = new THREE.CanvasTexture(bagCanvas);
-bagTex.colorSpace = THREE.SRGBColorSpace;
-bagTex.anisotropy = 4;
-function drawBag(bean) {
-  const x = bagCanvas.getContext('2d');
-  const w = bagCanvas.width;
-  const h = bagCanvas.height;
-  x.fillStyle = '#c49866';
-  x.fillRect(0, 0, w, h);
-  for (let i = 0; i < 2600; i++) {
-    x.fillStyle = Math.random() < 0.5 ? `rgba(120,80,40,${rand(0.04, 0.14)})` : `rgba(240,210,160,${rand(0.04, 0.14)})`;
-    x.fillRect(Math.random() * w, Math.random() * h, rand(1, 3), rand(1, 8));
-  }
-  // 標籤
-  x.fillStyle = '#fbf6ea';
-  x.fillRect(70, 250, w - 140, 270);
-  x.strokeStyle = '#4a2f1d';
-  x.lineWidth = 5;
-  x.strokeRect(84, 264, w - 168, 242);
-  x.fillStyle = '#4a2f1d';
-  x.textAlign = 'center';
-  x.font = 'bold 30px "Huninn", sans-serif';
-  x.fillText('DRIP DRIP ROASTERY', w / 2, 310);
-  x.fillRect(150, 330, w - 300, 3);
-  x.font = 'bold 44px "Huninn", sans-serif';
-  const name = bean ? bean.name.split(' ') : ['精品咖啡豆'];
-  x.fillText(name[name.length - 1], w / 2, 392);
-  x.font = '30px "Huninn", sans-serif';
-  x.fillText(bean ? `${name[0]}・${bean.roast}` : '', w / 2, 440);
-  x.font = '24px "Huninn", sans-serif';
-  x.fillText(bean ? bean.desc : '', w / 2, 482);
-  bagTex.needsUpdate = true;
-}
-drawBag(null);
-
 /* ---------- 材質 ---------- */
 
 const std = (color, roughness = 0.5, metalness = 0, extra = {}) => new THREE.MeshStandardMaterial({
@@ -240,6 +201,7 @@ let view = 'angle';
 let raf = 0;
 let shakeT = 0;
 let last = 0;
+let table;
 const groups = {};
 const camPos = new THREE.Vector3();
 const camTarget = new THREE.Vector3();
@@ -249,6 +211,9 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 // 每個場景的三個鏡頭：[鏡頭 x, y, z, 看向 x, y, z]
 const VIEWS = {
+  shelf: {
+    angle: [0, 1.25, 4.75, 0, 0.6, 0],
+  },
   weigh: {
     angle: [0.5, 3.0, 4.6, 0.5, 0.9, 0],
     top: [0.35, 6.6, 0.01, 0.35, 0.5, 0],
@@ -271,6 +236,373 @@ const VIEWS = {
   },
 };
 const VIEW_NAMES = { angle: '斜角', top: '俯視', side: '側面' };
+
+/* ==========================================================
+   平底方袋（咖啡豆袋）：豆子架和秤豆共用
+   ========================================================== */
+
+// 袋子尺寸：寬、高、側摺厚度、頂端熱封條高度
+const POUCH = { w: 0.9, h: 1.36, d: 0.5, seal: 0.11 };
+const pouchTexCache = {};
+
+// 袋子的貼圖：一張彩色圖 + 金屬度圖 + 粗糙度圖，燙金的地方會反光、其他地方是霧面
+function pouchTextures(bean) {
+  if (pouchTexCache[bean.id]) return pouchTexCache[bean.id];
+  const paint = (w, h, draw) => {
+    const cv = [0, 1, 2].map(() => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      return c;
+    });
+    const ctx = { map: cv[0].getContext('2d'), metal: cv[1].getContext('2d'), rough: cv[2].getContext('2d') };
+    // 霧面袋身：底色 + 上亮下暗 + 細小顆粒
+    ctx.map.fillStyle = bean.bag;
+    ctx.map.fillRect(0, 0, w, h);
+    const gr = ctx.map.createLinearGradient(0, 0, 0, h);
+    gr.addColorStop(0, 'rgba(255,255,255,.10)');
+    gr.addColorStop(1, 'rgba(0,0,0,.12)');
+    ctx.map.fillStyle = gr;
+    ctx.map.fillRect(0, 0, w, h);
+    for (let i = 0; i < (w * h) / 40; i++) {
+      ctx.map.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},${rand(0.02, 0.05)})`;
+      ctx.map.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
+    }
+    ctx.metal.fillStyle = '#000';
+    ctx.metal.fillRect(0, 0, w, h);
+    ctx.rough.fillStyle = '#d0d0d0';
+    ctx.rough.fillRect(0, 0, w, h);
+    // foil(fn)：同一個圖形同時畫在三張圖上，就是燙金
+    const foil = (fn) => {
+      [['map', bean.foil], ['metal', '#ffffff'], ['rough', '#4a4a4a']].forEach(([k, col]) => {
+        const x = ctx[k];
+        x.save();
+        x.fillStyle = col;
+        x.strokeStyle = col;
+        fn(x);
+        x.restore();
+      });
+    };
+    draw(ctx, foil, w, h);
+    const tex = (c, srgb) => {
+      const t = new THREE.CanvasTexture(c);
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      return t;
+    };
+    return { map: tex(cv[0], true), metal: tex(cv[1], false), rough: tex(cv[2], false) };
+  };
+
+  // 正面：Estate Coffee、產地、燙金圓形徽章、重量
+  const front = paint(512, 768, (ctx, foil, w) => {
+    // 夾鏈的壓線
+    const zy = 768 * ((POUCH.seal + 0.08) / POUCH.h);
+    ctx.map.fillStyle = 'rgba(0,0,0,.2)';
+    ctx.map.fillRect(0, zy, w, 3);
+    ctx.map.fillStyle = 'rgba(255,255,255,.18)';
+    ctx.map.fillRect(0, zy + 3, w, 2);
+    foil((x) => {
+      x.fillRect(44, 212, 5, 96);
+      x.font = 'bold 44px Georgia, "Times New Roman", serif';
+      x.fillText('Estate', 62, 250);
+      x.fillText('Coffee', 62, 300);
+      x.font = 'italic 32px Georgia, "Times New Roman", serif';
+      x.fillText(bean.en, 64, 356);
+    });
+    foil((x) => {
+      // 徽章：雙圓框 + 冒煙的杯子 + 店名
+      x.lineWidth = 5;
+      x.beginPath();
+      x.arc(330, 496, 132, 0, TAU);
+      x.stroke();
+      x.lineWidth = 2;
+      x.beginPath();
+      x.arc(330, 496, 120, 0, TAU);
+      x.stroke();
+      x.lineWidth = 8;
+      x.lineCap = 'round';
+      x.lineJoin = 'round';
+      x.beginPath();
+      x.moveTo(276, 478);
+      x.lineTo(384, 478);
+      x.quadraticCurveTo(378, 546, 330, 546);
+      x.quadraticCurveTo(282, 546, 276, 478);
+      x.stroke();
+      x.beginPath();
+      x.arc(388, 502, 16, -Math.PI / 2, Math.PI / 2);
+      x.stroke();
+      [306, 330, 354].forEach((sx) => {
+        x.beginPath();
+        x.moveTo(sx, 462);
+        x.quadraticCurveTo(sx - 11, 446, sx, 430);
+        x.quadraticCurveTo(sx + 11, 414, sx, 398);
+        x.stroke();
+      });
+      x.font = 'bold 36px "Huninn", sans-serif';
+      x.textAlign = 'center';
+      x.fillText('滴滴手沖', 330, 596);
+    });
+    foil((x) => {
+      x.font = '28px Georgia, "Times New Roman", serif';
+      x.fillText('200g | 100% Arabica', 50, 700);
+    });
+  });
+
+  // 背面：小徽章、說明文字、條碼
+  const back = paint(512, 768, (ctx, foil, w) => {
+    foil((x) => {
+      x.lineWidth = 4;
+      x.beginPath();
+      x.arc(w / 2, 250, 52, 0, TAU);
+      x.stroke();
+      x.font = 'bold 30px "Huninn", sans-serif';
+      x.textAlign = 'center';
+      x.fillText('DRIP DRIP', w / 2, 350);
+      x.font = '24px "Huninn", sans-serif';
+      x.fillText(`${bean.name}・${bean.roast}`, w / 2, 392);
+    });
+    ctx.map.fillStyle = 'rgba(255,255,255,.32)';
+    for (let i = 0; i < 7; i++) ctx.map.fillRect(70, 430 + i * 22, i === 6 ? 220 : 372, 6);
+    ctx.map.fillStyle = '#f7f3ea';
+    ctx.map.fillRect(150, 620, 212, 96);
+    ctx.map.fillStyle = '#222';
+    for (let bx = 162; bx < 350; bx += 4 + Math.floor(Math.random() * 4)) ctx.map.fillRect(bx, 630, Math.random() < 0.5 ? 2 : 4, 64);
+  });
+
+  // 側摺：中間一道摺線（凹進去的那條）
+  const side = paint(256, 768, (ctx) => {
+    const g = ctx.map.createLinearGradient(0, 0, 256, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.5, 'rgba(0,0,0,.16)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.map.fillStyle = g;
+    ctx.map.fillRect(0, 0, 256, 768);
+    ctx.map.fillStyle = 'rgba(0,0,0,.28)';
+    ctx.map.fillRect(126, 0, 2, 768);
+    ctx.map.fillStyle = 'rgba(255,255,255,.16)';
+    ctx.map.fillRect(129, 0, 2, 768);
+  });
+
+  // 熱封條：一條條橫向壓紋，兩端有撕口
+  const seal = paint(512, 64, (ctx, foil, w, h) => {
+    for (let y = 4; y < h - 4; y += 5) {
+      ctx.map.fillStyle = 'rgba(0,0,0,.16)';
+      ctx.map.fillRect(0, y, w, 2);
+      ctx.map.fillStyle = 'rgba(255,255,255,.14)';
+      ctx.map.fillRect(0, y + 2, w, 1);
+    }
+    ctx.map.fillStyle = 'rgba(0,0,0,.5)';
+    [20, w - 20].forEach((nx) => {
+      ctx.map.beginPath();
+      ctx.map.moveTo(nx - 7, h);
+      ctx.map.lineTo(nx + 7, h);
+      ctx.map.lineTo(nx, h - 16);
+      ctx.map.fill();
+    });
+  });
+  pouchTexCache[bean.id] = { front, back, side, seal };
+  return pouchTexCache[bean.id];
+}
+
+// 平底方袋：底部方正、正背面微鼓、兩側的側摺往內凹，到頂端收成一條熱封。
+// open = true 是剪開的袋子（秤豆時倒豆用），袋口看得到豆子。原點在袋底中心，正面朝 +z。
+function buildPouch(bean, { open = false } = {}) {
+  const { w, h, d, seal } = POUCH;
+  const T = pouchTextures(bean);
+  const mat = (t) => phys({
+    map: t.map, metalnessMap: t.metal, roughnessMap: t.rough, metalness: 1, roughness: 1,
+    sheen: 0.15, sheenRoughness: 0.6, sheenColor: new THREE.Color(0xffffff), envMapIntensity: 0.55,
+  });
+  const topK = (y) => ease(clamp01((y / h - 0.72) / 0.28));
+  const squeeze = open ? 0.46 : 0.05;
+  const geo = new THREE.BoxGeometry(w, h, d, 20, 44, 12);
+  geo.translate(0, h / 2, 0);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    const k = topK(y);
+    const fz = Math.abs(z) / (d / 2);
+    const fy = clamp01(y / h);
+    // 正背面裝了豆子微微鼓起；袋底一圈不鼓（平底）
+    const bulge = (1 - (x / (w / 2)) ** 2) * Math.sin(Math.PI * fy) ** 0.8 * 0.032 * fz;
+    const nz = z * lerp(1, squeeze, k) + Math.sign(z) * bulge * (1 - k * 0.6);
+    // 側摺：中線往內凹，越上面凹越深
+    let nx = x;
+    if (Math.abs(x) > w / 2 - 1e-4) nx = Math.sign(x) * (w / 2 - (1 - fz) ** 1.5 * (0.012 + 0.08 * k));
+    // 剪開的袋口邊緣有點不平
+    const ny = open && y > h - 1e-4 ? y - 0.012 * Math.sin((x / w) * 9 + 1) : y;
+    p.setXYZ(i, nx, ny, nz);
+  }
+  geo.computeVertexNormals();
+  const sideMat = mat(T.side);
+  const inside = std(0x24160d, 0.95);
+  const g = new THREE.Group();
+  // BoxGeometry 的面順序：+x, -x, +y, -y, +z, -z
+  g.add(mesh(geo, [sideMat, sideMat, open ? inside : sideMat, sideMat, mat(T.front), mat(T.back)]));
+
+  if (open) {
+    // 袋口裡的豆子（倒豆時會藏起來）
+    const top = new THREE.Group();
+    const bm = phys({ color: roastColor(bean), roughness: 0.5, clearcoat: 0.18, clearcoatRoughness: 0.5 });
+    for (let i = 0; i < 12; i++) {
+      const b = mesh(BEAN_GEO, bm, rand(-0.34, 0.34), h - 0.02, rand(-0.05, 0.05));
+      b.rotation.set(rand(-0.4, 0.4), rand(0, TAU), rand(-0.4, 0.4));
+      top.add(b);
+    }
+    g.add(top);
+    g.userData.top = top;
+  } else {
+    // 頂端熱封條
+    g.add(mesh(new RoundedBoxGeometry(w * 1.008, seal, 0.034, 2, 0.012), mat(T.seal), 0, h - seal / 2, 0));
+  }
+  // 單向排氣閥：白色底座 + 中間的小孔
+  const vy = h * 0.68;
+  const vz = (d / 2) * lerp(1, squeeze, topK(vy)) + Math.sin(Math.PI * (vy / h)) ** 0.8 * 0.032 + 0.006;
+  const valve = new THREE.Group();
+  valve.position.set(0, vy, vz);
+  valve.rotation.x = Math.PI / 2;
+  valve.add(mesh(cyl(0.05, 0.056, 0.012, 32), std(0xf0ece4, 0.35)));
+  valve.add(mesh(cyl(0.03, 0.03, 0.018, 24), std(0xdcd6ca, 0.3)));
+  [0, 1, 2, 3].forEach((i) => {
+    const a = (i / 4) * TAU;
+    valve.add(mesh(cyl(0.005, 0.005, 0.022, 8), std(0x8a8478, 0.6), Math.cos(a) * 0.014, 0, Math.sin(a) * 0.014));
+  });
+  g.add(valve);
+  shadows(g);
+  return g;
+}
+
+/* ==========================================================
+   場景零：豆子架（選豆）
+   ========================================================== */
+
+const SH = { built: false, bags: [], sel: -1, onPick: null, t: 0, hop: [] };
+const SHELF_X = [-1.22, 0, 1.22];
+const SHELF_Z = -0.38;
+
+// 牆面的灰泥紋理
+const plasterTex = canvasTex(256, 256, (x, w, h) => {
+  x.fillStyle = '#f3e8d6';
+  x.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2600; i++) {
+    x.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '150,120,90'},${rand(0.03, 0.08)})`;
+    x.beginPath();
+    x.arc(Math.random() * w, Math.random() * h, rand(0.5, 2.5), 0, TAU);
+    x.fill();
+  }
+}, { repeat: [4, 3] });
+
+// 層板前緣的小價卡
+function shelfTag(bean) {
+  const t = canvasTex(256, 96, (x, w, h) => {
+    x.fillStyle = '#fffaf0';
+    x.fillRect(0, 0, w, h);
+    x.strokeStyle = '#4a2f1d';
+    x.lineWidth = 6;
+    x.strokeRect(3, 3, w - 6, h - 6);
+    x.fillStyle = '#4a2f1d';
+    x.textAlign = 'center';
+    x.font = 'bold 34px "Huninn", sans-serif';
+    x.fillText(bean.name.split(' ').pop(), w / 2, 44);
+    x.font = '24px "Huninn", sans-serif';
+    x.fillText(`${bean.roast}・${bean.level}`, w / 2, 78);
+  });
+  return mesh(new THREE.PlaneGeometry(0.62, 0.23), std(0xffffff, 0.8, 0, { map: t }));
+}
+
+function buildShelf() {
+  const g = new THREE.Group();
+  g.add(mesh(new THREE.PlaneGeometry(16, 10), std(0xffffff, 0.95, 0, { map: plasterTex }), 0, 1.5, -1.0));
+  // 木層板 + 黑鐵層架托
+  g.add(mesh(new RoundedBoxGeometry(6.6, 0.16, 1.5, 3, 0.03), wood(0xe6cba8, 0.5), 0, -0.08, -0.25));
+  const iron = std(0x2b2b2d, 0.45, 0.6);
+  [-1.95, 1.95].forEach((x) => {
+    g.add(mesh(new RoundedBoxGeometry(0.07, 0.9, 0.05, 2, 0.015), iron, x, -0.6, -0.97));
+    g.add(mesh(new RoundedBoxGeometry(0.07, 0.05, 1.2, 2, 0.015), iron, x, -0.185, -0.4));
+    const brace = mesh(new RoundedBoxGeometry(0.05, 0.05, 1.0, 2, 0.015), iron, x, -0.58, -0.6);
+    brace.rotation.x = -0.72;
+    g.add(brace);
+    [-0.3, -0.9].forEach((y) => g.add(mesh(cyl(0.025, 0.025, 0.02, 12), steel(0.3), x, y, -0.96).rotateX(Math.PI / 2)));
+  });
+  // 袋子之間撒了幾顆豆子
+  const beanMat = phys({ color: 0x3a1d0b, roughness: 0.45, clearcoat: 0.25 });
+  [[-0.61, 0.22], [-0.55, 0.3], [-0.68, 0.34], [0.6, 0.26], [0.66, 0.36], [0.56, 0.4], [0.62, 0.12]].forEach(([x, z]) => {
+    const b = mesh(BEAN_GEO, beanMat, x, 0.025, z);
+    b.rotation.set(rand(-0.2, 0.2), rand(0, TAU), rand(-0.2, 0.2));
+    g.add(b);
+  });
+  SH.bagsGroup = new THREE.Group();
+  g.add(SH.bagsGroup);
+  shadows(g);
+  return g;
+}
+
+function resetShelf(data) {
+  if (!SH.built && data.beans) {
+    SH.built = true;
+    SH.bags = data.beans.map((bean, i) => {
+      const bag = buildPouch(bean);
+      bag.position.set(SHELF_X[i], 0, SHELF_Z);
+      const tag = shelfTag(bean);
+      tag.position.set(SHELF_X[i], -0.1, 0.505);
+      tag.receiveShadow = true;
+      SH.bagsGroup.add(bag, tag);
+      bag.traverse((o) => { o.userData.bagIdx = i; });
+      tag.userData.bagIdx = i;
+      return bag;
+    });
+  }
+  SH.bags.forEach((bag) => {
+    bag.position.set(bag.position.x, 0, SHELF_Z);
+    bag.rotation.set(0, 0, 0);
+  });
+  SH.hop = SH.bags.map(() => 1);
+  SH.sel = data.sel === undefined ? -1 : data.sel;
+  SH.onPick = data.onPick || null;
+}
+
+function selectShelf(i) {
+  if (i === SH.sel) return;
+  SH.sel = i;
+  if (SH.hop[i] !== undefined) SH.hop[i] = 0;
+}
+
+function updateShelf(dt) {
+  SH.t += dt;
+  const k = 1 - 0.003 ** dt;
+  SH.bags.forEach((bag, i) => {
+    const on = i === SH.sel;
+    // 選中的袋子從架上往前拉出來、輕輕跳一下，再慢慢左右轉、展示正面
+    SH.hop[i] = Math.min(1, SH.hop[i] + dt / 0.45);
+    bag.position.z = lerp(bag.position.z, on ? SHELF_Z + 0.5 : SHELF_Z, k);
+    bag.position.y = Math.sin(Math.PI * SH.hop[i]) * 0.16;
+    bag.rotation.y = lerp(bag.rotation.y, on ? Math.sin(SH.t * 1.3) * 0.2 : 0, k);
+    bag.rotation.z = on ? Math.sin(Math.PI * SH.hop[i]) * 0.06 : 0;
+  });
+}
+
+// 點到哪個袋子（或價卡）
+function shelfHit(clientX, clientY) {
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+  camera.updateMatrixWorld();
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(SH.bagsGroup, true)[0];
+  return hit ? hit.object.userData.bagIdx : -1;
+}
+
+function onShelfClick(e) {
+  const i = shelfHit(e.clientX, e.clientY);
+  if (i < 0) return;
+  selectShelf(i);
+  if (SH.onPick) SH.onPick(i);
+}
+
+function onShelfMove(e) {
+  if (host) host.style.cursor = shelfHit(e.clientX, e.clientY) >= 0 ? 'pointer' : '';
+}
 
 /* ==========================================================
    場景一：秤豆
@@ -313,25 +645,10 @@ function buildWeigh() {
     [0.79, 0.31], [0.48, 0.05], [0.001, 0.05],
   ]), glass(0.2), 0, BOWL_Y, BOWL_Z));
 
-  // 牛皮紙豆袋：底部寬、往上收扁，袋口有封邊和鐵絲
+  // 剪開的平底方袋（換豆子時換袋子）
   W.bag = new THREE.Group();
-  W.bag.position.set(2.0, 0, BOWL_Z);
-  const bagGeo = new THREE.BoxGeometry(0.95, 1.3, 0.56, 10, 16, 6);
-  bagGeo.translate(0, 0.65, 0);
-  const bp = bagGeo.attributes.position;
-  for (let i = 0; i < bp.count; i++) {
-    const t = bp.getY(i) / 1.3;
-    const zf = lerp(1, 0.09, t ** 1.7);
-    const xf = 1 + 0.05 * Math.sin(Math.PI * t);
-    bp.setXYZ(i, bp.getX(i) * xf + rand(-0.004, 0.004), bp.getY(i), bp.getZ(i) * zf + rand(-0.003, 0.003));
-  }
-  bagGeo.computeVertexNormals();
-  W.bag.add(mesh(bagGeo, std(0xffffff, 0.85, 0, { map: bagTex })));
-  W.bag.add(mesh(new RoundedBoxGeometry(0.98, 0.12, 0.06, 2, 0.02), std(0xb88a58, 0.8), 0, 1.33, 0));
-  W.bag.add(mesh(new RoundedBoxGeometry(1.08, 0.035, 0.07, 2, 0.012), steel(0.4, 0xd8c08a), 0, 1.25, 0));
-  const valve = mesh(cyl(0.065, 0.065, 0.02, 24), std(0xf2ede2, 0.4), 0.27, 0.98, 0.135);
-  valve.rotation.x = Math.PI / 2;
-  W.bag.add(valve);
+  W.bag.position.set(1.8, 0, BOWL_Z);
+  W.pouches = {};
   g.add(W.bag);
 
   W.group = g;
@@ -372,7 +689,11 @@ function resetWeigh(game) {
   if (game.bean) {
     const base = roastColor(game.bean);
     W.beanMats.forEach((m, i) => m.color.copy(base).multiplyScalar([1, 0.8, 1.2][i]));
-    drawBag(game.bean);
+    const id = game.bean.id;
+    if (!W.pouches[id]) W.pouches[id] = buildPouch(game.bean, { open: true });
+    W.bag.clear();
+    W.bag.add(W.pouches[id]);
+    W.pouch = W.pouches[id];
   }
 }
 
@@ -384,12 +705,14 @@ function updateWeigh(dt) {
   // 按住時先把袋子從桌上拿起來，再傾斜倒豆；放開就放回桌上
   W.lift = lerp(W.lift, W.pouring ? 1 : 0, 1 - 0.0004 ** dt);
   const up = ease(clamp01(W.lift * 1.3));
-  W.bag.position.set(lerp(2.0, 1.75, up), lerp(0, 1.95, up), BOWL_Z);
+  W.bag.position.set(lerp(1.8, 1.75, up), lerp(0, 1.95, up), BOWL_Z);
   W.tilt = 2.05 * ease(clamp01((W.lift - 0.3) / 0.7));
   W.bag.rotation.z = W.tilt;
+  // 袋口的豆子：袋子一傾斜就是倒出去了
+  if (W.pouch) W.pouch.userData.top.visible = W.tilt < 0.5;
 
   // 袋口在世界座標的位置
-  const mouth = new THREE.Vector3(-0.3, 1.32, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), W.tilt).add(W.bag.position);
+  const mouth = new THREE.Vector3(-0.3, POUCH.h, 0).applyAxisAngle(new THREE.Vector3(0, 0, 1), W.tilt).add(W.bag.position);
 
   const want = Math.min(110, Math.floor(W.grams / 0.18));
   while (W.lift > 0.75 && W.beans.length < want) {
@@ -1316,7 +1639,8 @@ function frame(now) {
     camera.position.y += (Math.random() - 0.5) * s;
   }
   camera.lookAt(lookAt);
-  if (mode === 'weigh') updateWeigh(dt);
+  if (mode === 'shelf') updateShelf(dt);
+  else if (mode === 'weigh') updateWeigh(dt);
   else if (mode === 'grind') updateGrind(dt);
   else if (mode === 'rinse') updateRinse(dt, now);
   else if (mode === 'brew') updateBrew(dt, now);
@@ -1355,10 +1679,11 @@ function init() {
   // 圓木桌
   const top = wood(0xffffff, 0.5);
   const side = wood(0x9a6a40, 0.6);
-  const table = mesh(cyl(4.4, 4.4, 0.3, 96), [side, top, side], 0, -0.15, 0);
+  table = mesh(cyl(4.4, 4.4, 0.3, 96), [side, top, side], 0, -0.15, 0);
   table.receiveShadow = true;
   scene.add(table);
 
+  groups.shelf = buildShelf();
   groups.weigh = buildWeigh();
   groups.grind = buildGrind();
   groups.rinse = new THREE.Group();
@@ -1390,15 +1715,26 @@ const api = {
   get active() { return !!host; },
 
   mount(hostEl, m, game) {
+    if (host) {
+      host.removeEventListener('click', onShelfClick);
+      host.removeEventListener('pointermove', onShelfMove);
+    }
     host = hostEl;
     mode = m;
     Object.entries(groups).forEach(([name, g]) => { g.visible = name === m; });
+    table.visible = m !== 'shelf'; // 豆子架是靠牆的層板，不放在圓桌上
+    if (m === 'shelf') {
+      resetShelf(game);
+      host.addEventListener('click', onShelfClick);
+      host.addEventListener('pointermove', onShelfMove);
+    }
     if (m === 'weigh') resetWeigh(game);
     if (m === 'grind') resetGrind(game);
     if (m === 'rinse') buildRinse(game);
     if (m === 'brew') buildBrew(game);
     host.appendChild(renderer.domElement);
-    host.appendChild(viewsEl);
+    if (m === 'shelf') viewsEl.remove();
+    else host.appendChild(viewsEl);
     resize();
     setView('angle', true);
     cancelAnimationFrame(raf);
@@ -1409,9 +1745,16 @@ const api = {
   unmount() {
     cancelAnimationFrame(raf);
     raf = 0;
+    if (host) {
+      host.removeEventListener('click', onShelfClick);
+      host.removeEventListener('pointermove', onShelfMove);
+      host.style.cursor = '';
+    }
     host = null;
     mode = null;
   },
+
+  setShelf(i) { selectShelf(i); },
 
   setWeigh(grams, pouring) { W.grams = grams; W.pouring = pouring; },
 
