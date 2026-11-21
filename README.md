@@ -28,3 +28,4 @@
 
 - 背景音樂：[Bossa Shop Theme](https://opengameart.org/content/bossa-shop-theme-in-low-fi-and-hd)，作者 SpringySpringo，CC0
 - 字型：[Huninn 粉圓體](https://fonts.google.com/specimen/Huninn)，justfont，SIL Open Font License 1.1
+- 圖示：[OpenMoji](https://openmoji.org/)，CC BY-SA 4.0（`icons/` 資料夾；外框顏色改成遊戲的深咖啡色，修改後的圖示同樣以 CC BY-SA 4.0 授權）

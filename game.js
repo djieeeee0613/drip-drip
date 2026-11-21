@@ -3,13 +3,13 @@
 /* ---------- 資料 ---------- */
 
 const BEANS = [
-  { id: 'yirga', name: '衣索比亞 耶加雪菲', flag: '🇪🇹', en: 'Yirgacheffe', bag: '#2a5f5d', foil: '#e2ac90', roast: '淺焙', color: '#b9824f',
+  { id: 'yirga', name: '衣索比亞 耶加雪菲', en: 'Yirgacheffe', bag: '#2a5f5d', foil: '#e2ac90', roast: '淺焙', color: '#b9824f',
     desc: '花香、柑橘、茶感', level: '標準', tag: 'mid', diff: 1.0, grind: 5,
     profile: { 酸: 8, 甜: 7, 苦: 2, 醇厚: 4, 香氣: 9 } },
-  { id: 'geisha', name: '巴拿馬 藝伎', flag: '🇵🇦', en: 'Geisha', bag: '#342c48', foil: '#dcbf7c', roast: '淺焙', color: '#c99a63',
+  { id: 'geisha', name: '巴拿馬 藝伎', en: 'Geisha', bag: '#342c48', foil: '#dcbf7c', roast: '淺焙', color: '#c99a63',
     desc: '茉莉、佛手柑、蜜桃', level: '困難', tag: 'hard', diff: 1.3, grind: 5,
     profile: { 酸: 7, 甜: 9, 苦: 1, 醇厚: 4, 香氣: 10 } },
-  { id: 'huila', name: '哥倫比亞 薇拉', flag: '🇨🇴', en: 'Huila', bag: '#9c4c31', foil: '#f4dcae', roast: '中焙', color: '#7a4a2b',
+  { id: 'huila', name: '哥倫比亞 薇拉', en: 'Huila', bag: '#9c4c31', foil: '#f4dcae', roast: '中焙', color: '#7a4a2b',
     desc: '焦糖、堅果、紅蘋果', level: '新手', tag: '', diff: 0.8, grind: 4,
     profile: { 酸: 5, 甜: 8, 苦: 4, 醇厚: 7, 香氣: 6 } },
 ];
@@ -25,21 +25,21 @@ const DRIPPERS = [
 
 // at = 該段建議開始注水的時間（秒），cum = 該段結束時的累計水量（g）
 const METHODS = [
-  { id: 'classic', name: '經典三段式', icon: '🌱', dose: 15, grindAdj: 1,
+  { id: 'classic', name: '經典三段式', icon: 'sprout', dose: 15, grindAdj: 1,
     desc: '悶蒸後分兩段注水，最好上手', level: '新手', tag: '',
     stages: [
       { label: '悶蒸', cum: 30, at: 0 },
       { label: '第二段', cum: 130, at: 30 },
       { label: '第三段', cum: 240, at: 75 },
     ] },
-  { id: 'hoffmann', name: 'Hoffmann 一刀流', icon: '🌀', dose: 15, grindAdj: 0,
+  { id: 'hoffmann', name: 'Hoffmann 一刀流', icon: 'cyclone', dose: 15, grindAdj: 0,
     desc: '悶蒸 45 秒後幾乎一口氣注完', level: '標準', tag: 'mid',
     stages: [
       { label: '悶蒸', cum: 45, at: 0 },
       { label: '主注水（前半）', cum: 150, at: 45 },
       { label: '主注水（後半）', cum: 250, at: 75 },
     ] },
-  { id: 'four6', name: '粕谷哲 4:6 法', icon: '🏆', dose: 20, grindAdj: 2,
+  { id: 'four6', name: '粕谷哲 4:6 法', icon: 'trophy', dose: 20, grindAdj: 2,
     desc: '300 g 水分五次，每 45 秒一段', level: '困難', tag: 'hard',
     stages: [
       { label: '第一段（酸甜）', cum: 60, at: 0 },
@@ -57,6 +57,14 @@ const GRIND_TURNS = 10; // 磨完要轉幾圈
 /* ---------- 小工具 ---------- */
 
 const $ = (id) => document.getElementById(id);
+// 圖示：OpenMoji（CC BY-SA 4.0），檔案在 icons/
+const icon = (name, cls = '') => `<img class="ic ${cls}" src="icons/${name}.svg" alt="" draggable="false">`;
+// 每一幀都會更新的文字：內容有變才重寫，圖示才不會一直重新載入
+const setHtml = (el, html) => {
+  if (el.dataset.h === html) return;
+  el.dataset.h = html;
+  el.innerHTML = html;
+};
 const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -422,7 +430,7 @@ function dripperArt(d) {
 
 function methodArt(m) {
   return `<svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" fill="#ffe9b8" stroke="#4a2f1d" stroke-width="4"/>
-    <text x="40" y="52" font-size="34" text-anchor="middle">${m.icon}</text></svg>`;
+    <image href="icons/${m.icon}.svg" x="9" y="9" width="62" height="62"/></svg>`;
 }
 
 /* ---------- 狀態 ---------- */
@@ -446,7 +454,7 @@ function showTitle() {
   const dex = loadDex();
   const keys = Object.keys(dex);
   const three = keys.filter((k) => dex[k] >= 3).length;
-  $('dex').textContent = `圖鑑 ${keys.length} / 27　⭐⭐⭐ ${three} 杯`;
+  $('dex').innerHTML = `圖鑑 ${keys.length} / 27　${icon('star').repeat(3)} ${three} 杯`;
   $('title-cat').innerHTML = catSvg('watch');
   show('s-title');
 }
@@ -816,17 +824,17 @@ function brewLoop(t) {
     $('brew-bar').style.width = `${clamp(frac * 80, 0, 100)}%`;
     $('brew-bar').classList.toggle('over', brew.water > st.cum + 6);
     if (brew.pouring || brew.stageStarted) {
-      when.textContent = brew.water >= st.cum - 6 ? '夠了，放開手指！' : `注水中…到 ${st.cum} g 放開`;
+      setHtml(when, brew.water >= st.cum - 6 ? '夠了，放開手指！' : `注水中…到 ${st.cum} g 放開`);
       if (brew.water >= st.cum - 6) when.classList.add('go');
     } else if (brew.stage === 0) {
-      when.textContent = '按住粉床開始注水';
+      setHtml(when, '按住粉床開始注水');
     } else if (brew.clock < st.at - 5) {
-      when.textContent = `⏳ 等到 ${fmtTime(st.at)} 再注水`;
+      setHtml(when, `${icon('hourglass')} 等到 ${fmtTime(st.at)} 再注水`);
     } else if (brew.clock <= st.at + 6) {
-      when.textContent = '就是現在，注水！';
+      setHtml(when, '就是現在，注水！');
       when.classList.add('go');
     } else {
-      when.textContent = '太晚了，快注水！';
+      setHtml(when, '太晚了，快注水！');
       when.classList.add('late');
       if (!brew.lateWarned && brew.clock > st.at + 12) { brew.lateWarned = true; bossRage('快點注水！'); }
     }
@@ -834,7 +842,7 @@ function brewLoop(t) {
     brew.drain += dt;
     $('brew-stage').textContent = '等咖啡滴完…';
     $('brew-bar').style.width = '80%';
-    when.textContent = '';
+    setHtml(when, '');
     if (brew.drain > 2.4) {
       brew.running = false;
       finish();
@@ -1131,7 +1139,7 @@ function finish() {
   // 畫面
   saveDex(`${bean.id}-${dripper.id}-${method.id}`, stars);
   $('result-cat').innerHTML = catSvg(finalMood(lastResult));
-  $('stars').innerHTML = [0, 1, 2].map((i) => `<span>${i < stars ? '⭐' : '☆'}</span>`).join('');
+  $('stars').innerHTML = [0, 1, 2].map((i) => `<span>${icon('star', i < stars ? '' : 'off')}</span>`).join('');
   $('score').textContent = '0';
   $('comment').textContent = comment;
   const rows = [
@@ -1143,7 +1151,7 @@ function finish() {
     ['手法', sTech, 15, ''],
   ];
   $('breakdown').innerHTML = rows.map((r) => `<li><span>${r[0]} <small>${r[3]}</small></span><b>${Math.round(r[1])} / ${r[2]}</b></li>`).join('')
-    + `<li><span>💢 惹店長生氣</span><b>${boss.count} 次</b></li>`;
+    + `<li><span>${icon('anger')} 惹店長生氣</span><b>${boss.count} 次</b></li>`;
   drawRadar(p, cup);
   playServe(tasting, () => {
     show('s-result');
@@ -1296,7 +1304,7 @@ function runTasting(t) {
   $('react-fx').innerHTML = '';
   $('t-notes').innerHTML = '';
   $('react-say').textContent = '';
-  $('btn-skip').textContent = '跳過 ▶';
+  $('btn-skip').innerHTML = `跳過 ${icon('skip')}`;
   $('t-bean').textContent = `${t.bean.name}・${t.bean.roast}`;
   $('t-score').textContent = '--';
   $('t-stamp').className = 't-stamp';
@@ -1401,7 +1409,7 @@ function runTasting(t) {
   });
   at(v + 1100, () => {
     const st = $('t-stamp');
-    st.innerHTML = `<small>${'★'.repeat(t.stars)}${'☆'.repeat(3 - t.stars)}</small>${T.stamp}`;
+    st.innerHTML = `<small>${icon('star').repeat(t.stars)}${icon('star', 'off').repeat(3 - t.stars)}</small>${T.stamp}`;
     st.className = `t-stamp slam s${t.stars}`;
     $('t-card').classList.remove('thud');
     void $('t-card').offsetWidth;
@@ -1416,7 +1424,7 @@ function runTasting(t) {
       if (step.fx) spawnFx(step.fx, spot(0.5, 0.56));
       if (step.sfx) sfx(step.sfx);
       $('app').classList.toggle('shake', step.anim === 'rage');
-      $('btn-skip').textContent = '看結果 ▶';
+      $('btn-skip').innerHTML = `看結果 ${icon('play')}`;
     });
     f += step.ms;
   });
@@ -1467,7 +1475,7 @@ function spawnFx(kind, from) {
     const el = document.createElement('i');
     const r = Math.random;
     if (kind === 'hearts' || kind === 'sparkle') {
-      el.textContent = kind === 'hearts' ? ['💗', '💕', '✨'][i % 3] : '✨';
+      el.innerHTML = icon(kind === 'hearts' ? ['heart-growing', 'two-hearts', 'sparkles'][i % 3] : 'sparkles');
       el.style.cssText = `left:${from.x - 40 + r() * 80}px;top:${from.y - 30 - r() * 40}px;--dx:${(r() - 0.5) * 140}px;font-size:${16 + r() * 14}px;`
         + `animation:fxUp ${1.3 + r()}s ${r() * 0.7}s ease-out forwards`;
     } else if (kind === 'confetti') {
@@ -1594,6 +1602,14 @@ async function makeShareCard() {
   const g = c.getContext('2d');
   const INK = '#4a2f1d';
   const FONT = '"Huninn", "Microsoft JhengHei", "PingFang TC", sans-serif';
+  // 圖示（直接開 index.html 檔案時，畫上檔案圖片會讓圖卡無法匯出，就略過）
+  const ic = async (name) => {
+    if (location.protocol === 'file:') return null;
+    const img = new Image();
+    img.src = `icons/${name}.svg`;
+    try { await img.decode(); return img; } catch (e) { return null; }
+  };
+  const [starImg, angerImg] = await Promise.all([ic('star'), ic('anger')]);
   const box = (x, y, w, h, rad) => {
     g.beginPath();
     g.moveTo(x + rad, y);
@@ -1629,8 +1645,17 @@ async function makeShareCard() {
   // 店長 + 分數
   const cat = await svgToImage(catSvg(finalMood(r)), 250, 300);
   g.drawImage(cat, 70, 200, 250, 300);
-  g.font = `60px ${FONT}`;
-  g.fillText('⭐'.repeat(r.stars) + '☆'.repeat(3 - r.stars), 490, 290);
+  for (let i = 0; i < 3; i++) {
+    const x = 490 + (i - 1) * 76 - 38;
+    if (starImg) {
+      g.globalAlpha = i < r.stars ? 1 : 0.25;
+      g.drawImage(starImg, x, 222, 76, 76);
+      g.globalAlpha = 1;
+    } else {
+      g.font = `60px ${FONT}`;
+      g.fillText(i < r.stars ? '★' : '☆', x + 38, 290);
+    }
+  }
   g.font = `bold 130px ${FONT}`;
   g.fillText(r.score, 470, 420);
   const sw = g.measureText(r.score).width;
@@ -1638,7 +1663,15 @@ async function makeShareCard() {
   g.fillText('分', 470 + sw / 2 + 30, 420);
   g.fillStyle = '#e2463a';
   g.font = `bold 30px ${FONT}`;
-  g.fillText(`💢 惹店長生氣 ${r.anger} 次`, 490, 478);
+  const angerText = `惹店長生氣 ${r.anger} 次`;
+  if (angerImg) {
+    const tw = g.measureText(angerText).width;
+    const x0 = 490 - (tw + 46) / 2;
+    g.drawImage(angerImg, x0 - 4, 442, 46, 46);
+    g.fillText(angerText, x0 + 46 + tw / 2, 478);
+  } else {
+    g.fillText(angerText, 490, 478);
+  }
 
   // 這一杯的組合
   box(70, 525, W - 140, 110, 24);
@@ -1668,7 +1701,7 @@ async function makeShareCard() {
 
   g.fillStyle = '#b56a22';
   g.font = `22px ${FONT}`;
-  g.fillText(gameUrl().replace(/^https?:\/\//, '') || '來挑戰店長拿鐵吧 ☕', W / 2, H - 52);
+  g.fillText(gameUrl().replace(/^https?:\/\//, '') || '來挑戰店長拿鐵吧！', W / 2, H - 52);
   return c;
 }
 

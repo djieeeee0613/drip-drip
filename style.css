@@ -133,6 +133,18 @@ html, body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 
+/* 圖示（OpenMoji，跟著字的大小縮放） */
+.ic {
+  display: inline-block;
+  width: 1.35em;
+  height: 1.35em;
+  vertical-align: -0.32em;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.ic.off { filter: grayscale(1) opacity(.35); }
+
 /* 音樂開關 */
 .music {
   position: absolute;
@@ -148,7 +160,20 @@ html, body {
   box-shadow: 0 3px 0 var(--ink);
   cursor: pointer;
 }
-.music.off { opacity: .45; text-decoration: line-through; }
+.music .ic { width: 28px; height: 28px; vertical-align: middle; }
+.music.off { opacity: .5; }
+.music.off::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: var(--ink);
+  transform: rotate(-45deg);
+}
 
 /* 按鈕 */
 .btn {
@@ -368,6 +393,7 @@ html, body {
 /* 評鑑 */
 .result-head { display: flex; align-items: center; gap: 14px; }
 .stars { font-size: 38px; letter-spacing: 2px; }
+.stars .ic { width: 1.25em; height: 1.25em; }
 .stars span { display: inline-block; animation: star .4s backwards; }
 .stars span:nth-child(2) { animation-delay: .2s; }
 .stars span:nth-child(3) { animation-delay: .4s; }
@@ -951,6 +977,7 @@ html, body {
   background: rgba(255, 250, 240, .6);
 }
 .t-stamp small { display: block; font-size: 12px; letter-spacing: 2px; }
+.t-stamp small .ic { width: 1.3em; height: 1.3em; vertical-align: -0.25em; mix-blend-mode: normal; }
 .t-stamp.s3 { border-color: #c98a1d; color: #c98a1d; }
 .t-stamp.s0 { border-color: #5a3a24; color: #5a3a24; }
 .t-stamp.slam { animation: slam .45s cubic-bezier(.2, .9, .3, 1.3) forwards; }
